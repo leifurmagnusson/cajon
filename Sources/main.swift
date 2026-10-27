@@ -142,7 +142,7 @@ final class HandView: NSView, NSDraggingSource {
     var phi = Spring(k: 16, c: 4.2)
     var shift = Spring(k: 14, c: 4.5)
     var dip = Spring(k: 90, c: 8)
-    var slide = Spring(k: 55, c: 12, pos: 1)  // 0 = visible, 1 = fuera de pantalla
+    var slide = Spring(k: 90, c: 11, pos: 1)  // 0 = visible, 1 = fuera de pantalla
 
     var dragActive = false { didSet { needsDisplay = true } }
     private var dragHover = false { didSet { needsDisplay = true } }
@@ -235,9 +235,61 @@ final class HandView: NSView, NSDraggingSource {
         phi.target = max(-0.22, min(0.22, -com * 0.006))
         shift.target = max(-26, min(26, -com * 0.55))
         phi.step(dt); shift.step(dt); dip.step(dt); slide.step(dt)
+        if exitT != nil { advanceGoodbye(dt); moving = true }
         if !phi.resting || !shift.resting || !dip.resting || !slide.resting { moving = true }
         if moving { needsDisplay = true }
         return moving
+    }
+
+    // MARK: Despedida
+    // Cuando se queda sin cajas: espera un segundo, dice adiós con la mano
+    // y se va bajando una escalera a saltitos.
+
+    private(set) var exitT: CGFloat?
+    private var exitOffset = CGPoint.zero
+    private var exitPhi: CGFloat = 0
+    var goodbyeFinished: Bool { (exitT ?? 0) > 3.5 }
+
+    func startGoodbye() {
+        guard exitT == nil else { return }
+        exitT = 0
+        needsDisplay = true
+    }
+
+    func cancelGoodbye() {
+        guard exitT != nil else { return }
+        // Si vuelve a hacer falta a media escalera, sube desde donde esté (sin saltos bruscos).
+        slide.pos += exitOffset.x / 300
+        dip.pos += exitOffset.y
+        phi.pos += exitPhi
+        exitT = nil
+        exitOffset = .zero
+        exitPhi = 0
+        needsDisplay = true
+    }
+
+    private func advanceGoodbye(_ dt: CGFloat) {
+        guard var t = exitT else { return }
+        t += dt
+        exitT = t
+        if t < 0.9 {
+            // Se queda un momento, como pensándoselo
+            exitOffset = .zero
+            exitPhi = 0.025 * sin(t * 6)
+        } else if t < 2.1 {
+            // ¡Adiós! (tres saludos con la muñeca, un poco levantada)
+            let w = t - 0.9
+            let env = sin(min(1, w / 1.2) * .pi)
+            exitOffset = CGPoint(x: 0, y: -10 * env)
+            exitPhi = 0.34 * sin(w * 2 * .pi * 2.5) * env
+        } else {
+            // Baja la escalera: 4 escalones, cada uno con su saltito
+            let u = (t - 2.1) / 0.32
+            let k = floor(u), f = u - k
+            let ease = f * f * (3 - 2 * f)
+            exitOffset = CGPoint(x: 36 * (k + ease), y: 30 * (k + ease) - 16 * sin(.pi * f))
+            exitPhi = 0.16 * sin(.pi * f)
+        }
     }
 
     func nudgeAll(_ amount: CGFloat) {
@@ -254,8 +306,9 @@ final class HandView: NSView, NSDraggingSource {
         let avail = palm.y - 24
         let s = min(1, max(0.45, avail / (CGFloat(n) * 64 + 4)))
         boxSize = CGSize(width: 86 * s, height: 64 * s)
-        handTransform = CGAffineTransform(translationX: palm.x + shift.pos + slide.pos * 300, y: palm.y + dip.pos)
-            .rotated(by: phi.pos)
+        handTransform = CGAffineTransform(translationX: palm.x + shift.pos + slide.pos * 300 + exitOffset.x,
+                                          y: palm.y + dip.pos + exitOffset.y)
+            .rotated(by: phi.pos + exitPhi)
         var t = handTransform.translatedBy(x: -10, y: -1)
         transforms = []
         for id in order {
@@ -630,7 +683,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lastTime = now
         frameCount += 1
 
-        if frameCount % 6 == 0 { watchDrag() }
+        if frameCount % 2 == 0 { watchDrag() }
         if frameCount % 120 == 0 { Store.shared.prune() }
         guard panel.isVisible else { return }
 
@@ -638,7 +691,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         _ = hand.step(dt / 2)
         _ = hand.step(dt / 2)
 
-        if !shouldShow && hand.slide.pos > 0.97 { panel.orderOut(nil) }
+        if !shouldShow && (hand.slide.pos > 0.97 || hand.goodbyeFinished) && panel.isVisible {
+            panel.orderOut(nil)
+            hand.cancelGoodbye()
+            hand.slide.pos = 1
+            hand.slide.vel = 0
+            hadItems = false
+        }
 
         // Fuera de la mano y las cajas, los clics pasan a lo que haya debajo.
         if dragActive {
@@ -677,12 +736,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var shouldShow: Bool { dragActive || !Store.shared.items.isEmpty || Prefs.alwaysVisible }
 
+    private var hadItems = false
+
     private func updateVisibility() {
+        if !Store.shared.items.isEmpty { hadItems = true }
         if shouldShow {
-            if !panel.isVisible { hand.slide.pos = 1; panel.orderFrontRegardless() }
+            hand.cancelGoodbye()
+            if !panel.isVisible {
+                hand.slide.pos = 1
+                hand.phi.vel += 0.7          // entra con un pequeño "¡aquí estoy!"
+                panel.orderFrontRegardless()
+            }
             hand.slide.target = 0
+        } else if hadItems {
+            hand.startGoodbye()               // se despide y baja la escalera
         } else {
-            hand.slide.target = 1
+            hand.slide.target = 1             // arrastre sin soltar nada: se va sin más
         }
         hand.needsDisplay = true
     }
