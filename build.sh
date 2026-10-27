@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 APP="dist/Hold It.app"
 rm -rf dist build && mkdir -p build "$APP/Contents/MacOS" "$APP/Contents/Resources"
 for arch in arm64 x86_64; do
-  xcrun swiftc -O -target "$arch-apple-macos13.0" -o "build/HoldIt-$arch" Sources/main.swift
+  xcrun swiftc -O -target "$arch-apple-macos13.0" -o "build/HoldIt-$arch" Sources/*.swift
 done
 lipo -create build/HoldIt-arm64 build/HoldIt-x86_64 -output "$APP/Contents/MacOS/HoldIt"
 cp Info.plist "$APP/Contents/Info.plist"

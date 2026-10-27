@@ -1,699 +1,626 @@
-// Hold It — una estantería flotante para arrastrar y soltar (inspirada en Yoink).
-// App nativa de macOS 13+, un solo archivo, sin dependencias.
+// Hold It — una mano de camarero que te aguanta lo que arrastras.
+// Sueltas archivos sobre la mano y se apilan como cajas; si las tocas, se tambalean
+// y la mano hace equilibrio hasta que se quedan quietas.
 
 import AppKit
 import ServiceManagement
 import QuickLookThumbnailing
 
-// MARK: - Preferencias
+// MARK: - Utilidades de dibujo
 
-enum Prefs {
-    private static let d = UserDefaults.standard
-    static var alwaysVisible: Bool {
-        get { d.bool(forKey: "alwaysVisible") }
-        set { d.set(newValue, forKey: "alwaysVisible") }
+/// Convierte un trazado tipo SVG (solo M, L, C, Z con coordenadas absolutas) en CGPath.
+/// Así la mano se diseña en SVG y aquí se dibuja exactamente igual.
+func svgPath(_ d: String) -> CGPath {
+    let p = CGMutablePath()
+    var tokens: [String] = []
+    var cur = ""
+    for ch in d {
+        if "MLCZ".contains(ch) {
+            if !cur.isEmpty { tokens.append(cur); cur = "" }
+            tokens.append(String(ch))
+        } else if ch == " " || ch == "," || ch == "\n" {
+            if !cur.isEmpty { tokens.append(cur); cur = "" }
+        } else {
+            cur.append(ch)
+        }
     }
-    static var removeAfterDrag: Bool {
-        get { d.object(forKey: "removeAfterDrag") as? Bool ?? true }
-        set { d.set(newValue, forKey: "removeAfterDrag") }
+    if !cur.isEmpty { tokens.append(cur) }
+    var i = 0
+    var cmd = "M"
+    func num() -> CGFloat { defer { i += 1 }; return CGFloat(Double(tokens[i]) ?? 0) }
+    while i < tokens.count {
+        if "MLCZ".contains(tokens[i]) { cmd = tokens[i]; i += 1; if cmd == "Z" { p.closeSubpath() }; continue }
+        switch cmd {
+        case "M": let x = num(), y = num(); p.move(to: CGPoint(x: x, y: y)); cmd = "L"
+        case "L": let x = num(), y = num(); p.addLine(to: CGPoint(x: x, y: y))
+        case "C":
+            let a = num(), b = num(), c = num(), e = num(), f = num(), g = num()
+            p.addCurve(to: CGPoint(x: f, y: g), control1: CGPoint(x: a, y: b), control2: CGPoint(x: c, y: e))
+        default: i += 1
+        }
     }
-    static var leftEdge: Bool {
-        get { d.bool(forKey: "leftEdge") }
-        set { d.set(newValue, forKey: "leftEdge") }
+    return p
+}
+
+extension NSColor {
+    convenience init(hex: UInt32, alpha: CGFloat = 1) {
+        self.init(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255,
+                  blue: CGFloat(hex & 0xFF) / 255, alpha: alpha)
     }
 }
 
-// MARK: - Modelo
+enum Art {
+    // Mano enguantada, palma hacia arriba, dedos hacia la izquierda. Origen = centro de la palma.
+    static let glove = svgPath("""
+        M 40 -1 L -50 -1 C -58 -1 -63 -4 -66 -9 C -68 -12 -65 -15 -62 -13 C -59 -11 -57 -8 -50 -7
+        C -60 -6 -70 -2 -71 5 C -72 10 -68 13 -63 13 C -66 16 -64 21 -58 21 C -58 25 -53 27 -47 26
+        C -45 29 -40 30 -34 29 L 24 25 C 35 24 42 16 42 8 Z
+        """)
+    static let fingerLines = svgPath("""
+        M -63 13 C -55 12 -46 12 -38 11 M -58 21 C -50 20 -42 19 -34 18 M -47 26 C -42 25 -37 24 -32 23
+        """)
+    static let thumb = svgPath("M 30 2 C 22 -2 10 -8 2 -12 C -4 -15 -9 -10 -5 -6 C 2 0 12 8 22 12 Z")
+    static let sleeve = svgPath("M 34 6 L 56 -6 L 190 116 L 150 142 Z")
+    static let cuff = svgPath("M 34 8 L 54 -4 L 68 10 L 46 23 Z")
 
-final class ShelfItem {
-    let id = UUID()
-    let isClip: Bool               // true = lo creó Hold It (texto, imagen, enlace pegado)
-    private(set) var bookmark: Data?
-    private var fallback: URL
+    static let gloveTop = NSColor(hex: 0xFFFFFF).cgColor
+    static let gloveBottom = NSColor(hex: 0xE6E4DE).cgColor
+    static let gloveStroke = NSColor(hex: 0xBDBAB2).cgColor
+    static let lineColor = NSColor(hex: 0xCFCCC4).cgColor
+    static let sleeveA = NSColor(hex: 0x2B2F3A).cgColor
+    static let sleeveB = NSColor(hex: 0x171A21).cgColor
+    static let gold = NSColor(hex: 0xC9A24A).cgColor
+    static let kraftTop = NSColor(hex: 0xE2BC84).cgColor
+    static let kraftBottom = NSColor(hex: 0xCC9E62).cgColor
+    static let kraftStroke = NSColor(hex: 0xA97B45).cgColor
+    static let kraftLine = NSColor(hex: 0xB88A55).cgColor
+    static let tape = NSColor(hex: 0xEFD9AE, alpha: 0.9).cgColor
 
-    /// Siempre resuelve el marcador: si mueves el archivo en Finder, Hold It lo sigue.
-    var url: URL {
-        if let b = bookmark {
-            var stale = false
-            if let u = try? URL(resolvingBookmarkData: b, options: [.withoutUI, .withoutMounting],
-                                relativeTo: nil, bookmarkDataIsStale: &stale) {
-                if stale { bookmark = try? u.bookmarkData() }
-                fallback = u
-                return u
-            }
+    static func gradient(_ a: CGColor, _ b: CGColor) -> CGGradient {
+        CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB), colors: [a, b] as CFArray, locations: [0, 1])!
+    }
+    static let gloveGrad = gradient(gloveTop, gloveBottom)
+    static let sleeveGrad = gradient(sleeveA, sleeveB)
+    static let kraftGrad = gradient(kraftTop, kraftBottom)
+
+    /// Icono de la barra de menús: mano con una caja (plantilla en blanco y negro).
+    static func menuBarImage() -> NSImage {
+        let img = NSImage(size: NSSize(width: 20, height: 18), flipped: true) { _ in
+            guard let cg = NSGraphicsContext.current?.cgContext else { return false }
+            cg.translateBy(x: 11, y: 12.5)
+            cg.scaleBy(x: 0.135, y: 0.135)
+            cg.setFillColor(NSColor.black.cgColor)
+            cg.addPath(glove); cg.fillPath()
+            cg.addPath(CGPath(roundedRect: CGRect(x: -42, y: -64, width: 64, height: 56), cornerWidth: 8, cornerHeight: 8, transform: nil))
+            cg.fillPath()
+            return true
         }
-        return fallback
-    }
-    var exists: Bool { FileManager.default.fileExists(atPath: url.path) }
-
-    init(url: URL, isClip: Bool) {
-        self.fallback = url
-        self.isClip = isClip
-        self.bookmark = try? url.bookmarkData()
-    }
-
-    init?(bookmark b: Data, isClip: Bool) {
-        var stale = false
-        guard let u = try? URL(resolvingBookmarkData: b, options: [.withoutUI, .withoutMounting],
-                               relativeTo: nil, bookmarkDataIsStale: &stale),
-              FileManager.default.fileExists(atPath: u.path) else { return nil }
-        self.fallback = u
-        self.isClip = isClip
-        self.bookmark = stale ? (try? u.bookmarkData()) : b
+        img.isTemplate = true
+        return img
     }
 }
 
-final class Store {
-    static let shared = Store()
-    private(set) var items: [ShelfItem] = []
-    var onChange: (() -> Void)?
-    let clipsDir: URL
+// MARK: - Física
 
-    private init() {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("HoldIt", isDirectory: true)
-        clipsDir = base.appendingPathComponent("Recortes", isDirectory: true)
-        try? FileManager.default.createDirectory(at: clipsDir, withIntermediateDirectories: true)
-        load()
-        cleanOrphanClips()
+struct Spring {
+    var pos: CGFloat = 0
+    var vel: CGFloat = 0
+    var target: CGFloat = 0
+    let k: CGFloat
+    let c: CGFloat
+    init(k: CGFloat, c: CGFloat, pos: CGFloat = 0) { self.k = k; self.c = c; self.pos = pos }
+    @discardableResult
+    mutating func step(_ dt: CGFloat, extra: CGFloat = 0) -> CGFloat {
+        let a = -k * (pos - target) - c * vel + extra
+        vel += a * dt
+        pos += vel * dt
+        return a
     }
-
-    func add(_ urls: [URL], isClip: Bool = false) {
-        var changed = false
-        for u in urls where !items.contains(where: { $0.url.path == u.path }) {
-            items.append(ShelfItem(url: u, isClip: isClip))
-            changed = true
-        }
-        if changed { save(); onChange?() }
-    }
-
-    func remove(_ item: ShelfItem) {
-        items.removeAll { $0.id == item.id }
-        save(); onChange?()
-    }
-
-    func removeAll() {
-        items.removeAll()
-        save(); onChange?()
-    }
-
-    /// Quita los elementos cuyo archivo ya no existe (borrado, vaciado de papelera…).
-    func prune() {
-        let before = items.count
-        items.removeAll { !$0.exists }
-        if items.count != before { save(); onChange?() }
-    }
-
-    private func save() {
-        let arr: [[String: Any]] = items.compactMap { i in
-            guard let b = i.bookmark else { return nil }
-            return ["b": b, "c": i.isClip]
-        }
-        UserDefaults.standard.set(arr, forKey: "items")
-    }
-
-    private func load() {
-        guard let arr = UserDefaults.standard.array(forKey: "items") as? [[String: Any]] else { return }
-        items = arr.compactMap { d in
-            guard let b = d["b"] as? Data else { return nil }
-            return ShelfItem(bookmark: b, isClip: d["c"] as? Bool ?? false)
-        }
-    }
-
-    /// Borra recortes que ya no están en el cajón (se hace al arrancar, nunca en caliente,
-    /// para no pisar a una app que aún esté leyendo un archivo que acabas de soltarle).
-    private func cleanOrphanClips() {
-        let base = clipsDir.standardizedFileURL.path + "/"
-        var keep = Set<String>()
-        for i in items where i.isClip {
-            let p = i.url.standardizedFileURL.path
-            if p.hasPrefix(base) {
-                keep.insert(String(p.dropFirst(base.count)).components(separatedBy: "/").first ?? "")
-            }
-        }
-        let entries = (try? FileManager.default.contentsOfDirectory(atPath: clipsDir.path)) ?? []
-        for e in entries where !keep.contains(e) {
-            try? FileManager.default.removeItem(at: clipsDir.appendingPathComponent(e))
-        }
-    }
-
-    // MARK: Recortes (lo que no es un archivo se convierte en archivo)
-
-    private func stamp() -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd HH.mm.ss"
-        return f.string(from: Date())
-    }
-
-    private func sanitize(_ s: String) -> String {
-        s.replacingOccurrences(of: "/", with: "-")
-         .replacingOccurrences(of: ":", with: "-")
-         .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func uniqueURL(_ base: String, ext: String) -> URL {
-        var u = clipsDir.appendingPathComponent(base).appendingPathExtension(ext)
-        var n = 2
-        while FileManager.default.fileExists(atPath: u.path) {
-            u = clipsDir.appendingPathComponent("\(base) \(n)").appendingPathExtension(ext)
-            n += 1
-        }
-        return u
-    }
-
-    func clip(text: String) -> URL? {
-        let first = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
-        let name = sanitize(String(first.prefix(40)))
-        let u = uniqueURL(name.isEmpty ? "Texto \(stamp())" : name, ext: "txt")
-        do { try text.write(to: u, atomically: true, encoding: .utf8); return u } catch { return nil }
-    }
-
-    func clip(image: NSImage) -> URL? {
-        guard let tiff = image.tiffRepresentation,
-              let rep = NSBitmapImageRep(data: tiff),
-              let png = rep.representation(using: .png, properties: [:]) else { return nil }
-        let u = uniqueURL("Imagen \(stamp())", ext: "png")
-        do { try png.write(to: u); return u } catch { return nil }
-    }
-
-    func clip(webURL: URL) -> URL? {
-        let name = sanitize(webURL.host ?? "Enlace")
-        let u = uniqueURL(name.isEmpty ? "Enlace" : name, ext: "webloc")
-        guard let data = try? PropertyListSerialization.data(
-            fromPropertyList: ["URL": webURL.absoluteString], format: .xml, options: 0) else { return nil }
-        do { try data.write(to: u); return u } catch { return nil }
-    }
+    var resting: Bool { abs(vel) < 0.003 && abs(pos - target) < 0.003 }
 }
 
-let promiseQueue: OperationQueue = {
-    let q = OperationQueue()
-    q.qualityOfService = .userInitiated
-    return q
-}()
-
-/// Mete en el cajón lo que haya en un portapapeles (de arrastre o el general).
-@discardableResult
-func ingest(_ pb: NSPasteboard) -> Bool {
-    let store = Store.shared
-
-    // 1. Archivos de verdad (Finder, escritorio…): se guarda una referencia, no una copia.
-    if let urls = pb.readObjects(forClasses: [NSURL.self],
-                                 options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
-        store.add(urls)
-        return true
-    }
-    // 2. Archivos "prometidos" (adjuntos de Mail, Fotos, imágenes de Safari…).
-    if let promises = pb.readObjects(forClasses: [NSFilePromiseReceiver.self], options: nil)
-        as? [NSFilePromiseReceiver], !promises.isEmpty {
-        let dest = store.clipsDir.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try? FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
-        for p in promises {
-            p.receivePromisedFiles(atDestination: dest, options: [:], operationQueue: promiseQueue) { url, error in
-                guard error == nil else { return }
-                DispatchQueue.main.async { store.add([url], isClip: true) }
-            }
-        }
-        return true
-    }
-    // 3. Imágenes sueltas.
-    if let imgs = pb.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
-       let img = imgs.first, let u = store.clip(image: img) {
-        store.add([u], isClip: true)
-        return true
-    }
-    // 4. Enlaces web.
-    if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
-       let w = urls.first(where: { !$0.isFileURL }), let u = store.clip(webURL: w) {
-        store.add([u], isClip: true)
-        return true
-    }
-    // 5. Texto.
-    if let s = pb.string(forType: .string), !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-       let u = store.clip(text: s) {
-        store.add([u], isClip: true)
-        return true
-    }
-    return false
+/// Cada caja: inclinación, desplazamiento lateral y caída (al soltarla cae desde arriba y rebota).
+/// Tarda unos 2–3 segundos en quedarse recta.
+final class BoxState {
+    var ang = Spring(k: 34, c: 3.0)
+    var x = Spring(k: 30, c: 4.5)
+    var y = Spring(k: 130, c: 9)
+    var lastAccel: CGFloat = 0
 }
 
-// MARK: - Vistas
+// MARK: - La mano
 
-final class FlippedView: NSView { override var isFlipped: Bool { true } }
+final class HandView: NSView, NSDraggingSource {
+    override var isFlipped: Bool { true }
 
-/// Capa decorativa que no intercepta clics ni arrastres.
-final class PassthroughView: NSView { override func hitTest(_ point: NSPoint) -> NSView? { nil } }
+    var states: [UUID: BoxState] = [:]
+    private var order: [UUID] = []
+    private var thumbs: [UUID: NSImage] = [:]
+    private var draggingIDs: Set<UUID> = []
 
-final class ItemView: NSView, NSDraggingSource {
-    static let height: CGFloat = 84
-    let item: ShelfItem
-    private let icon = NSImageView()
-    private let label = NSTextField(wrappingLabelWithString: "")
-    private let closeBtn = NSButton()
-    private var downEvent: NSEvent?
-    private var hovering = false { didSet { updateLook() } }
+    // Mano: inclinación (equilibrio), desplazamiento, hundimiento al recibir y entrada/salida.
+    var phi = Spring(k: 16, c: 4.2)
+    var shift = Spring(k: 14, c: 4.5)
+    var dip = Spring(k: 90, c: 8)
+    var slide = Spring(k: 55, c: 12, pos: 1)  // 0 = visible, 1 = fuera de pantalla
 
-    init(item: ShelfItem) {
-        self.item = item
-        super.init(frame: .zero)
-        translatesAutoresizingMaskIntoConstraints = false
-        wantsLayer = true
-        layer?.cornerRadius = 10
+    var dragActive = false { didSet { needsDisplay = true } }
+    private var dragHover = false { didSet { needsDisplay = true } }
 
-        icon.translatesAutoresizingMaskIntoConstraints = false
-        icon.imageScaling = .scaleProportionallyUpOrDown
-        icon.image = NSWorkspace.shared.icon(forFile: item.url.path)
+    private var transforms: [CGAffineTransform] = []
+    private var handTransform = CGAffineTransform.identity
+    private var boxSize = CGSize(width: 86, height: 64)
+    private var hovered: Int?
+    private var lastMouse: NSPoint?
+    private var downPoint: NSPoint?
+    private var downTarget: Int?   // índice de caja, o -1 = la mano (todas)
 
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.stringValue = item.url.lastPathComponent
-        label.font = .systemFont(ofSize: 10.5, weight: .medium)
-        label.alignment = .center
-        label.textColor = .labelColor
-        label.maximumNumberOfLines = 2
-        label.lineBreakMode = .byWordWrapping
-        label.cell?.truncatesLastVisibleLine = true
-        label.isSelectable = false
-
-        closeBtn.translatesAutoresizingMaskIntoConstraints = false
-        closeBtn.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Quitar")
-        closeBtn.isBordered = false
-        closeBtn.contentTintColor = .secondaryLabelColor
-        closeBtn.target = self
-        closeBtn.action = #selector(removeMe)
-        closeBtn.isHidden = true
-        closeBtn.toolTip = "Quitar de Hold It"
-
-        addSubview(icon); addSubview(label); addSubview(closeBtn)
-        NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: ItemView.height),
-            icon.topAnchor.constraint(equalTo: topAnchor, constant: 6),
-            icon.centerXAnchor.constraint(equalTo: centerXAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 46),
-            icon.heightAnchor.constraint(equalToConstant: 46),
-            label.topAnchor.constraint(equalTo: icon.bottomAnchor, constant: 2),
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
-            closeBtn.topAnchor.constraint(equalTo: topAnchor, constant: 3),
-            closeBtn.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -3),
-            closeBtn.widthAnchor.constraint(equalToConstant: 16),
-            closeBtn.heightAnchor.constraint(equalToConstant: 16),
-        ])
-        toolTip = item.url.path
-        addTrackingArea(NSTrackingArea(rect: .zero,
-                                       options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        var types: [NSPasteboard.PasteboardType] = [.fileURL, .URL, .string, .tiff, .png]
+        types += NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType($0) }
+        registerForDraggedTypes(types)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
                                        owner: self, userInfo: nil))
-        loadThumbnail()
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    private func loadThumbnail() {
-        let scale = NSScreen.main?.backingScaleFactor ?? 2
-        let req = QLThumbnailGenerator.Request(fileAt: item.url, size: CGSize(width: 46, height: 46),
-                                               scale: scale, representationTypes: .thumbnail)
+    var items: [ShelfItem] { Store.shared.items }
+
+    // MARK: Sincronizar con el modelo
+
+    func reload() {
+        let newOrder = items.map { $0.id }
+        let oldIndex = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0) })
+        var prevDelta = 0
+        for (i, id) in newOrder.enumerated() {
+            if let st = states[id], let old = oldIndex[id] {
+                // Si se ha quitado una caja de debajo, esta (y las de encima) caen a su sitio.
+                let delta = old - i
+                if delta > prevDelta { st.y.pos -= CGFloat(delta - prevDelta) * boxSize.height; st.ang.vel += .random(in: -0.6...0.6) }
+                prevDelta = delta
+            } else {
+                let st = BoxState()
+                st.ang.pos = .random(in: -0.32...0.32)
+                st.x.pos = .random(in: -14...14)
+                st.y.pos = -170
+                states[id] = st
+                dip.vel += 70
+                phi.vel += .random(in: -0.5...0.5)
+                loadThumb(items[i])
+            }
+        }
+        for id in order where !newOrder.contains(id) { states[id] = nil; thumbs[id] = nil }
+        order = newOrder
+        needsDisplay = true
+    }
+
+    private func loadThumb(_ item: ShelfItem) {
+        let id = item.id
+        thumbs[id] = NSWorkspace.shared.icon(forFile: item.url.path)
+        let req = QLThumbnailGenerator.Request(fileAt: item.url, size: CGSize(width: 48, height: 48),
+                                               scale: NSScreen.main?.backingScaleFactor ?? 2, representationTypes: .thumbnail)
         QLThumbnailGenerator.shared.generateBestRepresentation(for: req) { [weak self] rep, _ in
             guard let img = rep?.nsImage else { return }
-            DispatchQueue.main.async { self?.icon.image = img }
+            DispatchQueue.main.async { self?.thumbs[id] = img; self?.needsDisplay = true }
         }
     }
 
-    private func updateLook() {
-        layer?.backgroundColor = hovering ? NSColor.labelColor.withAlphaComponent(0.10).cgColor : NSColor.clear.cgColor
-        closeBtn.isHidden = !hovering
+    // MARK: Animación
+
+    /// Un paso de simulación. Devuelve true si algo se sigue moviendo.
+    func step(_ dt: CGFloat) -> Bool {
+        var moving = false
+        var belowAccel: CGFloat = 0
+        var px: CGFloat = 0, acc: CGFloat = 0, com: CGFloat = 0
+        let h = boxSize.height
+        for id in order {
+            guard let st = states[id] else { continue }
+            // La caja de encima reacciona al revés que la de abajo: así la torre se balancea.
+            let a = st.ang.step(dt, extra: -0.35 * belowAccel)
+            st.lastAccel = a
+            belowAccel = a
+            st.x.step(dt)
+            st.y.step(dt)
+            if !st.ang.resting || !st.x.resting || !st.y.resting { moving = true }
+            px += st.x.pos
+            acc += st.ang.pos
+            com += px + sin(acc) * h / 2
+            px += sin(acc) * h
+        }
+        // La mano compensa: se inclina y se desplaza hacia el lado contrario al peso.
+        if !order.isEmpty { com /= CGFloat(order.count) }
+        phi.target = max(-0.22, min(0.22, -com * 0.006))
+        shift.target = max(-26, min(26, -com * 0.55))
+        phi.step(dt); shift.step(dt); dip.step(dt); slide.step(dt)
+        if !phi.resting || !shift.resting || !dip.resting || !slide.resting { moving = true }
+        if moving { needsDisplay = true }
+        return moving
     }
 
-    override func mouseEntered(with event: NSEvent) { hovering = true }
-    override func mouseExited(with event: NSEvent) { hovering = false }
+    func nudgeAll(_ amount: CGFloat) {
+        for st in states.values { st.ang.vel += .random(in: -amount...amount) }
+        phi.vel += CGFloat.random(in: -amount...amount) * 0.4
+    }
+
+    // MARK: Geometría
+
+    private var palm: CGPoint { CGPoint(x: bounds.width - 118, y: bounds.height - 74) }
+
+    private func layout() {
+        let n = max(order.count, 1)
+        let avail = palm.y - 24
+        let s = min(1, max(0.45, avail / (CGFloat(n) * 64 + 4)))
+        boxSize = CGSize(width: 86 * s, height: 64 * s)
+        handTransform = CGAffineTransform(translationX: palm.x + shift.pos + slide.pos * 300, y: palm.y + dip.pos)
+            .rotated(by: phi.pos)
+        var t = handTransform.translatedBy(x: -10, y: -1)
+        transforms = []
+        for id in order {
+            let st = states[id]!
+            t = t.translatedBy(x: st.x.pos, y: st.y.pos).rotated(by: st.ang.pos)
+            transforms.append(t)
+            t = t.translatedBy(x: 0, y: -boxSize.height)
+        }
+    }
+
+    private var boxRect: CGRect {
+        CGRect(x: -boxSize.width / 2, y: -boxSize.height, width: boxSize.width, height: boxSize.height)
+    }
+
+    private func boxIndex(at p: NSPoint) -> Int? {
+        for i in transforms.indices.reversed() where !draggingIDs.contains(order[i]) {
+            if boxRect.contains(p.applying(transforms[i].inverted())) { return i }
+        }
+        return nil
+    }
+
+    private func onHand(_ p: NSPoint) -> Bool {
+        CGRect(x: -76, y: -16, width: 124, height: 48).contains(p.applying(handTransform.inverted()))
+    }
+
+    /// Zona (en coordenadas de la vista) que debe capturar el ratón; el resto deja pasar los clics.
+    func interactiveRect() -> CGRect {
+        var r = CGRect(x: -80, y: -20, width: 260, height: 170).applying(handTransform)
+        for t in transforms { r = r.union(boxRect.insetBy(dx: -4, dy: -4).applying(t)) }
+        return r
+    }
+
+    // MARK: Dibujo
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let cg = NSGraphicsContext.current?.cgContext else { return }
+        layout()
+
+        if dragActive {
+            let top = CGPoint(x: 0, y: -boxSize.height * CGFloat(order.count) - 40).applying(handTransform)
+            let colors = [NSColor.controlAccentColor.withAlphaComponent(dragHover ? 0.38 : 0.16).cgColor,
+                          NSColor.controlAccentColor.withAlphaComponent(0).cgColor]
+            let g = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB), colors: colors as CFArray, locations: [0, 1])!
+            cg.drawRadialGradient(g, startCenter: top, startRadius: 0, endCenter: top, endRadius: dragHover ? 130 : 105, options: [])
+        }
+
+        cg.saveGState()
+        cg.concatenate(handTransform)
+        cg.setShadow(offset: CGSize(width: 0, height: -3), blur: 8, color: NSColor(white: 0, alpha: 0.28).cgColor)
+        // Manga del camarero
+        cg.saveGState()
+        cg.addPath(Art.sleeve); cg.clip()
+        cg.drawLinearGradient(Art.sleeveGrad, start: CGPoint(x: 40, y: 0), end: CGPoint(x: 160, y: 130), options: [])
+        cg.restoreGState()
+        // Puño de la camisa con gemelo
+        cg.addPath(Art.cuff); cg.setFillColor(.white); cg.fillPath()
+        cg.setShadow(offset: .zero, blur: 0, color: nil)
+        cg.addPath(Art.cuff); cg.setStrokeColor(NSColor(hex: 0xD4D2CC).cgColor); cg.setLineWidth(1); cg.strokePath()
+        cg.setFillColor(Art.gold); cg.fillEllipse(in: CGRect(x: 51.8, y: 7.8, width: 4.4, height: 4.4))
+        // Guante
+        cg.setShadow(offset: CGSize(width: 0, height: -2), blur: 6, color: NSColor(white: 0, alpha: 0.22).cgColor)
+        cg.addPath(Art.glove); cg.setFillColor(Art.gloveBottom); cg.fillPath()
+        cg.setShadow(offset: .zero, blur: 0, color: nil)
+        drawGlove(cg, Art.glove)
+        cg.addPath(Art.fingerLines); cg.setStrokeColor(Art.lineColor); cg.setLineWidth(1.1); cg.setLineCap(.round); cg.strokePath()
+        cg.restoreGState()
+
+        // Cajas
+        for (i, t) in transforms.enumerated() where !draggingIDs.contains(order[i]) {
+            cg.saveGState()
+            cg.concatenate(t)
+            drawBox(cg, item: items[i], highlighted: hovered == i)
+            cg.restoreGState()
+        }
+
+        // El pulgar va por delante de la primera caja: la sujeta.
+        cg.saveGState()
+        cg.concatenate(handTransform)
+        drawGlove(cg, Art.thumb)
+        cg.restoreGState()
+    }
+
+    private func drawGlove(_ cg: CGContext, _ path: CGPath) {
+        cg.saveGState()
+        cg.addPath(path); cg.clip()
+        cg.drawLinearGradient(Art.gloveGrad, start: CGPoint(x: 0, y: -16), end: CGPoint(x: 0, y: 30), options: [])
+        cg.restoreGState()
+        cg.addPath(path); cg.setStrokeColor(Art.gloveStroke); cg.setLineWidth(1.3); cg.setLineJoin(.round); cg.strokePath()
+    }
+
+    private func drawBox(_ cg: CGContext, item: ShelfItem, highlighted: Bool) {
+        let s = boxSize.height / 64
+        let r = boxRect
+        let body = CGPath(roundedRect: r, cornerWidth: 5 * s, cornerHeight: 5 * s, transform: nil)
+        cg.saveGState()
+        cg.setShadow(offset: CGSize(width: 0, height: -2), blur: 5, color: NSColor(white: 0, alpha: 0.25).cgColor)
+        cg.addPath(body); cg.setFillColor(Art.kraftBottom); cg.fillPath()
+        cg.restoreGState()
+        cg.saveGState()
+        cg.addPath(body); cg.clip()
+        cg.drawLinearGradient(Art.kraftGrad, start: CGPoint(x: 0, y: r.minY), end: CGPoint(x: 0, y: r.maxY), options: [])
+        cg.setFillColor(Art.tape)
+        cg.fill(CGRect(x: -7 * s, y: r.minY, width: 14 * s, height: 22 * s))
+        cg.setStrokeColor(Art.kraftLine); cg.setLineWidth(1)
+        cg.move(to: CGPoint(x: r.minX, y: r.minY + 12 * s)); cg.addLine(to: CGPoint(x: r.maxX, y: r.minY + 12 * s)); cg.strokePath()
+        cg.restoreGState()
+        cg.addPath(body)
+        cg.setStrokeColor(highlighted ? NSColor.controlAccentColor.cgColor : Art.kraftStroke)
+        cg.setLineWidth(highlighted ? 2 : 1.2)
+        cg.strokePath()
+
+        // Etiqueta blanca con la miniatura y el nombre
+        let label = CGRect(x: -32 * s, y: r.minY + 17 * s, width: 64 * s, height: 42 * s)
+        cg.addPath(CGPath(roundedRect: label, cornerWidth: 4 * s, cornerHeight: 4 * s, transform: nil))
+        cg.setFillColor(NSColor(white: 1, alpha: 0.94).cgColor); cg.fillPath()
+        if let img = thumbs[item.id] {
+            let side = 24 * s
+            img.draw(in: NSRect(x: -side / 2, y: label.minY + 3 * s, width: side, height: side),
+                     from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        }
+        let para = NSMutableParagraphStyle()
+        para.alignment = .center
+        para.lineBreakMode = .byTruncatingMiddle
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: max(6.5, 8.5 * s), weight: .medium),
+            .foregroundColor: NSColor(hex: 0x3A3027),
+            .paragraphStyle: para,
+        ]
+        (item.url.lastPathComponent as NSString).draw(in: NSRect(x: label.minX + 3 * s, y: label.minY + 28 * s,
+                                                                 width: label.width - 6 * s, height: 12 * s),
+                                                      withAttributes: attrs)
+    }
+
+    // MARK: Ratón: tocar, sacar, abrir
+
+    override func mouseMoved(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        let dx = lastMouse.map { p.x - $0.x } ?? 0
+        lastMouse = p
+        let i = boxIndex(at: p)
+        if i != hovered {
+            if let i = i, let st = states[order[i]] {
+                // Al rozar una caja, se tambalea hacia donde la empujas.
+                let push = abs(dx) > 0.5 ? max(-1.6, min(1.6, dx * 0.12)) : CGFloat.random(in: -0.8...0.8)
+                st.ang.vel += push
+                st.x.vel += push * 12
+            }
+            hovered = i
+            needsDisplay = true
+        }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovered = nil; lastMouse = nil; needsDisplay = true
+    }
 
     override func mouseDown(with event: NSEvent) {
-        downEvent = event
-        if event.clickCount == 2 { NSWorkspace.shared.open(item.url) }
+        let p = convert(event.locationInWindow, from: nil)
+        downPoint = p
+        if let i = boxIndex(at: p) {
+            downTarget = i
+            if event.clickCount == 2 { NSWorkspace.shared.open(items[i].url) }
+            if let st = states[order[i]] { st.ang.vel += .random(in: -0.5...0.5) }
+        } else if onHand(p) {
+            downTarget = -1
+            nudgeAll(0.4)
+        } else {
+            downTarget = nil
+        }
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard let d = downEvent else { return }
-        let a = d.locationInWindow, b = event.locationInWindow
-        guard hypot(a.x - b.x, a.y - b.y) > 3 else { return }
-        downEvent = nil
-        let di = NSDraggingItem(pasteboardWriter: item.url as NSURL)
-        di.setDraggingFrame(icon.frame, contents: icon.image)
-        let s = beginDraggingSession(with: [di], event: event, source: self)
-        s.animatesToStartingPositionsOnCancelOrFail = true
+        guard let start = downPoint, let target = downTarget else { return }
+        let p = convert(event.locationInWindow, from: nil)
+        guard hypot(p.x - start.x, p.y - start.y) > 3 else { return }
+        downPoint = nil
+        let chosen: [(Int, ShelfItem)] = target >= 0 ? [(target, items[target])] : Array(items.enumerated())
+        guard !chosen.isEmpty else { return }
+        let dragItems: [NSDraggingItem] = chosen.enumerated().map { (k, pair) in
+            let di = NSDraggingItem(pasteboardWriter: pair.1.url as NSURL)
+            let img = thumbs[pair.1.id] ?? NSWorkspace.shared.icon(forFile: pair.1.url.path)
+            let off = CGFloat(min(k, 6)) * 5
+            di.setDraggingFrame(NSRect(x: p.x - 24 + off, y: p.y - 24 + off, width: 48, height: 48), contents: img)
+            return di
+        }
+        draggingIDs = Set(chosen.map { $0.1.id })
+        needsDisplay = true
+        let session = beginDraggingSession(with: dragItems, event: event, source: self)
+        session.animatesToStartingPositionsOnCancelOrFail = true
     }
 
-    // Siempre COPIA: soltar en Finder nunca te mueve (ni te pierde) el original.
-    func draggingSession(_ session: NSDraggingSession,
-                         sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
-        context == .outsideApplication ? .copy : []
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        context == .outsideApplication ? .copy : []   // siempre copia: el original nunca se mueve
     }
 
     func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
-        guard operation != [], Prefs.removeAfterDrag else { return }
-        let it = item
-        DispatchQueue.main.async { Store.shared.remove(it) }
+        let ids = draggingIDs
+        DispatchQueue.main.async {
+            self.draggingIDs = []
+            if operation != [], Prefs.removeAfterDrag {
+                for it in Store.shared.items where ids.contains(it.id) { Store.shared.remove(it) }
+            } else {
+                self.nudgeAll(0.6)
+            }
+            self.needsDisplay = true
+        }
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
+        let p = convert(event.locationInWindow, from: nil)
+        guard let i = boxIndex(at: p) else { return nil }
+        menuItem = items[i]
         let m = NSMenu()
         m.addItem(withTitle: "Abrir", action: #selector(openIt), keyEquivalent: "").target = self
         m.addItem(withTitle: "Mostrar en Finder", action: #selector(reveal), keyEquivalent: "").target = self
         m.addItem(withTitle: "Copiar", action: #selector(copyIt), keyEquivalent: "").target = self
         m.addItem(.separator())
-        m.addItem(withTitle: "Quitar de Hold It", action: #selector(removeMe), keyEquivalent: "").target = self
+        m.addItem(withTitle: "Quitar de la mano", action: #selector(removeIt), keyEquivalent: "").target = self
         return m
     }
-
-    @objc private func openIt() { NSWorkspace.shared.open(item.url) }
-    @objc private func reveal() { NSWorkspace.shared.activateFileViewerSelecting([item.url]) }
+    private var menuItem: ShelfItem?
+    @objc private func openIt() { if let it = menuItem { NSWorkspace.shared.open(it.url) } }
+    @objc private func reveal() { if let it = menuItem { NSWorkspace.shared.activateFileViewerSelecting([it.url]) } }
     @objc private func copyIt() {
+        guard let it = menuItem else { return }
         let pb = NSPasteboard.general
         pb.clearContents()
-        if item.isClip, item.url.pathExtension == "txt",
-           let s = try? String(contentsOf: item.url, encoding: .utf8) {
-            pb.setString(s, forType: .string)       // un texto se copia como texto
+        if it.isClip, it.url.pathExtension == "txt", let s = try? String(contentsOf: it.url, encoding: .utf8) {
+            pb.setString(s, forType: .string)
         } else {
-            pb.writeObjects([item.url as NSURL])    // un archivo se copia como archivo (⌘V en Finder)
+            pb.writeObjects([it.url as NSURL])
         }
     }
-    @objc private func removeMe() { Store.shared.remove(item) }
-}
+    @objc private func removeIt() { if let it = menuItem { Store.shared.remove(it) } }
 
-/// Cabecera: muestra el recuento y, si la arrastras, te llevas todo el cajón de golpe.
-final class HeaderView: NSView, NSDraggingSource {
-    private let label = NSTextField(labelWithString: "")
-    private let grip = NSImageView()
-    private var downEvent: NSEvent?
+    // MARK: Soltar encima
 
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        translatesAutoresizingMaskIntoConstraints = false
-        grip.translatesAutoresizingMaskIntoConstraints = false
-        grip.image = NSImage(systemSymbolName: "tray.full", accessibilityDescription: nil)
-        grip.contentTintColor = .secondaryLabelColor
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .systemFont(ofSize: 11, weight: .semibold)
-        label.textColor = .secondaryLabelColor
-        addSubview(grip); addSubview(label)
-        NSLayoutConstraint.activate([
-            grip.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            grip.centerYAnchor.constraint(equalTo: centerYAnchor),
-            grip.widthAnchor.constraint(equalToConstant: 15),
-            grip.heightAnchor.constraint(equalToConstant: 15),
-            label.leadingAnchor.constraint(equalTo: grip.trailingAnchor, constant: 6),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
-            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
-        ])
-    }
-    required init?(coder: NSCoder) { fatalError() }
-
-    func update(count: Int) {
-        label.stringValue = count == 0 ? "Hold It" : (count == 1 ? "1 elemento" : "\(count) elementos")
-        toolTip = count > 1 ? "Arrastra aquí para llevarte todo" : nil
-    }
-
-    override func mouseDown(with event: NSEvent) { downEvent = event }
-
-    override func mouseDragged(with event: NSEvent) {
-        guard let d = downEvent else { return }
-        let a = d.locationInWindow, b = event.locationInWindow
-        guard hypot(a.x - b.x, a.y - b.y) > 3 else { return }
-        downEvent = nil
-        let items = Store.shared.items
-        guard !items.isEmpty else { return }
-        let p = convert(event.locationInWindow, from: nil)
-        let dragItems: [NSDraggingItem] = items.enumerated().map { (i, it) in
-            let di = NSDraggingItem(pasteboardWriter: it.url as NSURL)
-            let img = NSWorkspace.shared.icon(forFile: it.url.path)
-            let off = CGFloat(min(i, 6)) * 4
-            di.setDraggingFrame(NSRect(x: p.x - 20 + off, y: p.y - 20 - off, width: 40, height: 40), contents: img)
-            return di
-        }
-        beginDraggingSession(with: dragItems, event: event, source: self)
-    }
-
-    func draggingSession(_ session: NSDraggingSession,
-                         sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
-        context == .outsideApplication ? .copy : []
-    }
-
-    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
-        guard operation != [], Prefs.removeAfterDrag else { return }
-        DispatchQueue.main.async { Store.shared.removeAll() }
-    }
-}
-
-final class ShelfView: NSView {
-    private let effect = NSVisualEffectView()
-    let header = HeaderView()
-    private let scroll = NSScrollView()
-    private let doc = FlippedView()
-    private let stack = NSStackView()
-    private let empty = NSStackView()
-    private let ring = PassthroughView()
-    static let radius: CGFloat = 16
-
-    private var highlighted = false {
-        didSet { ring.isHidden = !highlighted }
-    }
-
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-
-        effect.translatesAutoresizingMaskIntoConstraints = false
-        effect.material = .hudWindow
-        effect.blendingMode = .behindWindow
-        effect.state = .active
-        effect.maskImage = ShelfView.mask(ShelfView.radius)
-        addSubview(effect)
-
-        stack.orientation = .vertical
-        stack.spacing = 4
-        stack.alignment = .centerX
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        doc.translatesAutoresizingMaskIntoConstraints = false
-        doc.addSubview(stack)
-
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        scroll.drawsBackground = false
-        scroll.hasVerticalScroller = true
-        scroll.autohidesScrollers = true
-        scroll.scrollerStyle = .overlay
-        scroll.documentView = doc
-
-        let hint = NSTextField(labelWithString: "Suelta\naquí")
-        hint.font = .systemFont(ofSize: 12, weight: .medium)
-        hint.textColor = .secondaryLabelColor
-        hint.alignment = .center
-        hint.maximumNumberOfLines = 2
-        let hintIcon = NSImageView(image: NSImage(systemSymbolName: "tray.and.arrow.down",
-                                                  accessibilityDescription: nil) ?? NSImage())
-        hintIcon.symbolConfiguration = .init(pointSize: 26, weight: .light)
-        hintIcon.contentTintColor = .secondaryLabelColor
-        empty.orientation = .vertical
-        empty.spacing = 8
-        empty.addArrangedSubview(hintIcon)
-        empty.addArrangedSubview(hint)
-        empty.translatesAutoresizingMaskIntoConstraints = false
-
-        ring.translatesAutoresizingMaskIntoConstraints = false
-        ring.wantsLayer = true
-        ring.layer?.cornerRadius = ShelfView.radius - 3
-        ring.layer?.borderWidth = 2
-        ring.layer?.borderColor = NSColor.controlAccentColor.cgColor
-        ring.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.08).cgColor
-        ring.isHidden = true
-
-        effect.addSubview(header)
-        effect.addSubview(scroll)
-        effect.addSubview(empty)
-        effect.addSubview(ring)
-
-        NSLayoutConstraint.activate([
-            effect.leadingAnchor.constraint(equalTo: leadingAnchor),
-            effect.trailingAnchor.constraint(equalTo: trailingAnchor),
-            effect.topAnchor.constraint(equalTo: topAnchor),
-            effect.bottomAnchor.constraint(equalTo: bottomAnchor),
-
-            header.topAnchor.constraint(equalTo: effect.topAnchor, constant: 4),
-            header.leadingAnchor.constraint(equalTo: effect.leadingAnchor),
-            header.trailingAnchor.constraint(equalTo: effect.trailingAnchor),
-            header.heightAnchor.constraint(equalToConstant: 28),
-
-            scroll.topAnchor.constraint(equalTo: header.bottomAnchor),
-            scroll.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 6),
-            scroll.trailingAnchor.constraint(equalTo: effect.trailingAnchor, constant: -6),
-            scroll.bottomAnchor.constraint(equalTo: effect.bottomAnchor, constant: -6),
-
-            doc.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
-            doc.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
-            doc.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
-
-            stack.topAnchor.constraint(equalTo: doc.topAnchor),
-            stack.leadingAnchor.constraint(equalTo: doc.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: doc.trailingAnchor),
-            stack.bottomAnchor.constraint(equalTo: doc.bottomAnchor),
-
-            empty.centerXAnchor.constraint(equalTo: effect.centerXAnchor),
-            empty.centerYAnchor.constraint(equalTo: effect.centerYAnchor, constant: 10),
-
-            ring.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 3),
-            ring.trailingAnchor.constraint(equalTo: effect.trailingAnchor, constant: -3),
-            ring.topAnchor.constraint(equalTo: effect.topAnchor, constant: 3),
-            ring.bottomAnchor.constraint(equalTo: effect.bottomAnchor, constant: -3),
-        ])
-
-        var types: [NSPasteboard.PasteboardType] = [.fileURL, .URL, .string, .tiff, .png]
-        types += NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType($0) }
-        registerForDraggedTypes(types)
-    }
-    required init?(coder: NSCoder) { fatalError() }
-
-    static func mask(_ r: CGFloat) -> NSImage {
-        let d = r * 2 + 1
-        let img = NSImage(size: NSSize(width: d, height: d), flipped: false) { rect in
-            NSColor.black.setFill()
-            NSBezierPath(roundedRect: rect, xRadius: r, yRadius: r).fill()
-            return true
-        }
-        img.capInsets = NSEdgeInsets(top: r, left: r, bottom: r, right: r)
-        img.resizingMode = .stretch
-        return img
-    }
-
-    func reload() {
-        stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        for item in Store.shared.items {
-            let v = ItemView(item: item)
-            stack.addArrangedSubview(v)
-            v.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-        }
-        empty.isHidden = !Store.shared.items.isEmpty
-        header.update(count: Store.shared.items.count)
-    }
-
-    // MARK: Soltar dentro
-
-    private func isOurs(_ sender: NSDraggingInfo) -> Bool {
-        sender.draggingSource is ItemView || sender.draggingSource is HeaderView
-    }
+    private func isOurs(_ s: NSDraggingInfo) -> Bool { (s.draggingSource as? HandView) === self }
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         if isOurs(sender) { return [] }
-        highlighted = true
+        dragHover = true
+        phi.vel += 0.25; dip.vel -= 40   // la mano "se prepara"
         return .copy
     }
-    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        isOurs(sender) ? [] : .copy
-    }
-    override func draggingExited(_ sender: NSDraggingInfo?) { highlighted = false }
-    override func draggingEnded(_ sender: NSDraggingInfo) { highlighted = false }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { isOurs(sender) ? [] : .copy }
+    override func draggingExited(_ sender: NSDraggingInfo?) { dragHover = false }
+    override func draggingEnded(_ sender: NSDraggingInfo) { dragHover = false }
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        highlighted = false
+        dragHover = false
         return ingest(sender.draggingPasteboard)
     }
 }
 
-final class ShelfPanel: NSPanel {
+final class HandPanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 
 // MARK: - App
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
-    private var panel: ShelfPanel!
-    private var shelf: ShelfView!
+    private var panel: HandPanel!
+    private var hand: HandView!
     private var statusItem: NSStatusItem!
     private var timer: Timer?
     private let dragPB = NSPasteboard(name: .drag)
     private var baseline = 0
     private var dragActive = false
-    private var ticks = 0
-    private let width: CGFloat = 112
+    private var frameCount = 0
+    private var lastTime = CACurrentMediaTime()
+    private let width: CGFloat = 250
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        shelf = ShelfView(frame: NSRect(x: 0, y: 0, width: width, height: 200))
-        panel = ShelfPanel(contentRect: NSRect(x: 0, y: 0, width: width, height: 200),
-                           styleMask: [.borderless, .nonactivatingPanel],
-                           backing: .buffered, defer: false)
-        panel.contentView = shelf
+        panel = HandPanel(contentRect: NSRect(x: 0, y: 0, width: width, height: 600),
+                          styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        hand = HandView(frame: NSRect(x: 0, y: 0, width: width, height: 600))
+        panel.contentView = hand
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        panel.hasShadow = false
         panel.hidesOnDeactivate = false
         panel.becomesKeyOnlyIfNeeded = true
         panel.isReleasedWhenClosed = false
+        panel.acceptsMouseMovedEvents = true
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "tray.full", accessibilityDescription: "Hold It")
+        statusItem.button?.image = Art.menuBarImage()
+        statusItem.button?.toolTip = "Hold It"
         let menu = NSMenu()
         menu.delegate = self
         statusItem.menu = menu
 
-        Store.shared.onChange = { [weak self] in self?.refresh() }
+        Store.shared.onChange = { [weak self] in self?.modelChanged() }
         baseline = dragPB.changeCount
-        refresh()
+        place()
+        hand.reload()
+        updateVisibility()
 
-        timer = Timer(timeInterval: 0.15, repeats: true) { [weak self] _ in self?.tick() }
+        timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.frame() }
         RunLoop.main.add(timer!, forMode: .common)
 
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
-                                               object: nil, queue: .main) { [weak self] _ in
-            self?.layoutPanel(newScreen: true)
+                                               object: nil, queue: .main) { [weak self] _ in self?.place() }
+    }
+
+    private func frame() {
+        let now = CACurrentMediaTime()
+        let dt = CGFloat(min(now - lastTime, 1.0 / 30))
+        lastTime = now
+        frameCount += 1
+
+        if frameCount % 6 == 0 { watchDrag() }
+        if frameCount % 120 == 0 { Store.shared.prune() }
+        guard panel.isVisible else { return }
+
+        // Dos sub-pasos por fotograma: física más estable.
+        _ = hand.step(dt / 2)
+        _ = hand.step(dt / 2)
+
+        if !shouldShow && hand.slide.pos > 0.97 { panel.orderOut(nil) }
+
+        // Fuera de la mano y las cajas, los clics pasan a lo que haya debajo.
+        if dragActive {
+            panel.ignoresMouseEvents = false
+        } else {
+            let m = panel.convertPoint(fromScreen: NSEvent.mouseLocation)
+            let p = hand.convert(m, from: nil)
+            panel.ignoresMouseEvents = !hand.interactiveRect().contains(p)
         }
     }
 
-    /// Detecta que has empezado a arrastrar algo en cualquier app: el portapapeles
-    /// de arrastre cambia mientras el botón del ratón está pulsado.
-    private func tick() {
+    /// Detecta que estás arrastrando algo en cualquier app: el portapapeles de arrastre
+    /// cambia mientras el botón del ratón está pulsado.
+    private func watchDrag() {
         let pressed = (NSEvent.pressedMouseButtons & 1) == 1
         let cc = dragPB.changeCount
         if !pressed {
             baseline = cc
             if dragActive {
                 dragActive = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.updateVisibility() }
+                hand.dragActive = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.updateVisibility() }
             }
         } else if cc != baseline && !dragActive {
             dragActive = true
+            hand.dragActive = true
+            if !panel.isVisible { place() }
             updateVisibility()
         }
-        ticks += 1
-        if ticks % 20 == 0 { Store.shared.prune() }
     }
 
-    private func refresh() {
-        shelf.reload()
+    private func modelChanged() {
+        hand.reload()
         updateVisibility()
-        layoutPanel(newScreen: false)
     }
 
-    private var shouldShow: Bool {
-        dragActive || !Store.shared.items.isEmpty || Prefs.alwaysVisible
-    }
+    private var shouldShow: Bool { dragActive || !Store.shared.items.isEmpty || Prefs.alwaysVisible }
 
     private func updateVisibility() {
-        if shouldShow { show() } else { hide() }
-    }
-
-    private func show() {
-        guard !panel.isVisible || panel.alphaValue < 1 else { return }
-        if !panel.isVisible { layoutPanel(newScreen: true) }
-        panel.alphaValue = panel.isVisible ? panel.alphaValue : 0
-        panel.orderFrontRegardless()
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.18
-            panel.animator().alphaValue = 1
+        if shouldShow {
+            if !panel.isVisible { hand.slide.pos = 1; panel.orderFrontRegardless() }
+            hand.slide.target = 0
+        } else {
+            hand.slide.target = 1
         }
-    }
-
-    private func hide() {
-        guard panel.isVisible else { return }
-        NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.22
-            panel.animator().alphaValue = 0
-        }, completionHandler: { [weak self] in
-            guard let self = self, !self.shouldShow else { return }
-            self.panel.orderOut(nil)
-        })
+        hand.needsDisplay = true
     }
 
     private func mouseScreen() -> NSScreen {
@@ -701,16 +628,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return NSScreen.screens.first { NSMouseInRect(p, $0.frame, false) } ?? NSScreen.main ?? NSScreen.screens[0]
     }
 
-    private func layoutPanel(newScreen: Bool) {
-        let screen = (newScreen || panel.screen == nil) ? mouseScreen() : panel.screen!
-        let vf = screen.visibleFrame
-        let n = Store.shared.items.count
-        let content = 32 + CGFloat(max(n, 1)) * (ItemView.height + 4) + 10
-        let h = min(max(content, 170), vf.height * 0.8)
-        let x = Prefs.leftEdge ? vf.minX + 10 : vf.maxX - width - 10
-        let frame = NSRect(x: x, y: vf.midY - h / 2, width: width, height: h)
-        panel.setFrame(frame, display: true, animate: panel.isVisible && !newScreen)
-        panel.invalidateShadow()
+    private func place() {
+        let vf = mouseScreen().visibleFrame
+        let h = min(vf.height * 0.92, 900)
+        panel.setFrame(NSRect(x: vf.maxX - width, y: vf.minY, width: width, height: h), display: true)
+        hand.needsDisplay = true
     }
 
     // MARK: Menú de la barra
@@ -723,16 +645,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if let on = on { it.state = on ? .on : .off }
         }
         let n = Store.shared.items.count
-        let head = menu.addItem(withTitle: n == 0 ? "Hold It está vacío" : (n == 1 ? "1 elemento en Hold It" : "\(n) elementos en Hold It"),
+        let head = menu.addItem(withTitle: n == 0 ? "La mano está libre" : (n == 1 ? "Aguantando 1 cosa" : "Aguantando \(n) cosas"),
                                 action: nil, keyEquivalent: "")
         head.isEnabled = false
         menu.addItem(.separator())
-        add("Pegar en Hold It", #selector(pasteIn), key: "")
-        add("Vaciar Hold It", #selector(clearAll))
+        add("Pegar en la mano", #selector(pasteIn))
+        add("Soltarlo todo", #selector(clearAll))
+        add("Sacudir", #selector(shake))
         menu.addItem(.separator())
-        add("Mostrar siempre", #selector(toggleAlways), on: Prefs.alwaysVisible)
+        add("Mostrar siempre la mano", #selector(toggleAlways), on: Prefs.alwaysVisible)
         add("Quitar al arrastrar fuera", #selector(toggleRemove), on: Prefs.removeAfterDrag)
-        add("Colocar a la izquierda", #selector(toggleSide), on: Prefs.leftEdge)
         add("Abrir al iniciar sesión", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled)
         menu.addItem(.separator())
         add("Salir de Hold It", #selector(quit), key: "q")
@@ -740,9 +662,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func pasteIn() { ingest(NSPasteboard.general) }
     @objc private func clearAll() { Store.shared.removeAll() }
-    @objc private func toggleAlways() { Prefs.alwaysVisible.toggle(); updateVisibility() }
+    @objc private func shake() { hand.nudgeAll(1.4) }
+    @objc private func toggleAlways() { Prefs.alwaysVisible.toggle(); if Prefs.alwaysVisible { place() }; updateVisibility() }
     @objc private func toggleRemove() { Prefs.removeAfterDrag.toggle() }
-    @objc private func toggleSide() { Prefs.leftEdge.toggle(); layoutPanel(newScreen: false) }
     @objc private func toggleLogin() {
         do {
             if SMAppService.mainApp.status == .enabled { try SMAppService.mainApp.unregister() }
