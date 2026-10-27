@@ -48,6 +48,8 @@ final class Store {
     var onChange: (() -> Void)?
     var onNeedsYou: ((Chat) -> Void)?
     private let key = "chats.v1"
+    /// Última vez que cada chat se vio en su app (solo en memoria).
+    private var lastSeen: [String: Date] = [:]
 
     init() {
         if let d = UserDefaults.standard.data(forKey: key),
@@ -93,6 +95,20 @@ final class Store {
     func apply(_ observations: [Obs], frontmost: Set<Provider>, running: Set<Provider>) {
         let now = Date()
         var changed = false
+        // Renombrados: si de una app desaparece un chat y aparece otro nuevo a la vez, es el mismo con otro nombre.
+        let obsKeys = Set(observations.map { $0.key })
+        for p in [Provider.claude, .chatgpt] where running.contains(p) {
+            let gone = chats.indices.filter { chats[$0].provider == p && !obsKeys.contains(chats[$0].key)
+                && now.timeIntervalSince(lastSeen[chats[$0].key] ?? .distantPast) < 30 }
+            let fresh = observations.filter { $0.provider == p && index($0.key) == nil && lastSeen[$0.key] == nil }
+            if gone.count == 1, fresh.count == 1 {
+                lastSeen[fresh[0].key] = now
+                chats[gone[0]].key = fresh[0].key
+                chats[gone[0]].title = fresh[0].title
+                changed = true
+            }
+        }
+        for o in observations { lastSeen[o.key] = now }
         for o in observations {
             var i = index(o.key)
             if i == nil {

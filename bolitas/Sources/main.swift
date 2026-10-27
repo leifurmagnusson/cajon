@@ -96,7 +96,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         v.onMoved = { o in Prefs.setOrigin(o, for: Prefs.theme) }
         v.onDrop = { [weak self] s in self?.ingest(s) ?? false }
         v.menuFor = { [weak self] c in self?.chatMenu(c) }
-        v.onCassette = { p in Watcher.shared.newChat(p, voice: true) }
+        v.onMicrophone = { [weak self, weak v] at in
+            guard let self = self, let v = v else { return }
+            let m = NSMenu()
+            let h = m.addItem(withTitle: "🎙  Hablar con…", action: nil, keyEquivalent: ""); h.isEnabled = false
+            for p in [Provider.claude, .chatgpt] {
+                let it = m.addItem(withTitle: p.name, action: #selector(self.cabVoice(_:)), keyEquivalent: "")
+                it.target = self; it.representedObject = p.rawValue
+            }
+            m.popUp(positioning: nil, at: at, in: v)
+        }
         v.onCabinet = { [weak self, weak v] p, at in
             guard let self = self, let v = v else { return }
             self.cabinetMenu(p).popUp(positioning: nil, at: at, in: v)
@@ -240,6 +249,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let n2 = m.addItem(withTitle: "🎙  Conversación nueva hablando", action: #selector(cabVoice(_:)), keyEquivalent: "")
         n2.target = self; n2.representedObject = p.rawValue
         m.addItem(.separator())
+        let rh = m.addItem(withTitle: "Recientes · elige una para traerla a la mesa", action: nil, keyEquivalent: ""); rh.isEnabled = false
         let rec = Watcher.shared.recents[p] ?? []
         if rec.isEmpty {
             let it = m.addItem(withTitle: "Abre \(p.name) con la barra lateral visible para ver aquí tus conversaciones", action: nil, keyEquivalent: "")
@@ -256,8 +266,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     @objc private func cabNew(_ s: NSMenuItem) { if let r = s.representedObject as? String, let p = Provider(rawValue: r) { Watcher.shared.newChat(p, voice: false) } }
     @objc private func cabVoice(_ s: NSMenuItem) { if let r = s.representedObject as? String, let p = Provider(rawValue: r) { Watcher.shared.newChat(p, voice: true) } }
+    /// Elegir una conversación del archivador: entra un gorila nuevo para ella y se abre en su app.
     @objc private func cabOpen(_ s: NSMenuItem) {
         guard let a = s.representedObject as? [String], a.count == 2, let p = Provider(rawValue: a[0]) else { return }
+        let key = (p == .claude ? "claude:t:" : "chatgpt:") + a[1]
+        Store.shared.add(provider: p, title: a[1], chatID: nil, key: key, pinned: true)
         Watcher.shared.openTitle(a[1], p)
     }
 

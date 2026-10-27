@@ -40,11 +40,17 @@ class StageView: NSView {
     var t: CGFloat = 0
     /// Escala del dibujo (los monos se dibujan a su tamaño "de diseño" y se encogen con esto).
     class var drawScale: CGFloat { 1 }
+    /// Margen de arriba del dibujo (en coordenadas de dibujo), para escenas con fondo.
+    var drawOffsetY: CGFloat { 0 }
     func local(_ e: NSEvent) -> NSPoint {
         let p = convert(e.locationInWindow, from: nil)
         let k = type(of: self).drawScale
-        return NSPoint(x: p.x / k, y: p.y / k)
+        return NSPoint(x: p.x / k, y: p.y / k - drawOffsetY)
     }
+    /// Los que se han ido: siguen dibujándose un rato mientras salen por la puerta.
+    var leaving: [(chat: Chat, x: CGFloat, start: CGFloat)] = []
+    /// Posición x de un chat (para saber desde dónde se va). Las escenas con sitios lo dicen.
+    func seatX(_ i: Int, count: Int) -> CGFloat? { nil }
     var hoverIndex: Int?
     var hoverPoint: NSPoint?
     var dropHover = false
@@ -63,17 +69,41 @@ class StageView: NSView {
     var onCassette: ((Provider) -> Void)?
     /// Dónde está cada archivador, en coordenadas de dibujo (las subclases que lo tengan lo dicen).
     func cabinets() -> [(Provider, CGRect)] { [] }
-    private func cassetteRect(_ r: CGRect) -> CGRect { CGRect(x: r.minX + 3, y: r.minY - 24, width: r.width - 6, height: 22) }
     /// Mira si el clic ha sido en un archivador o en su grabadora.
+    /// Micrófono que cuelga del techo (las escenas que lo tengan dicen dónde).
+    func microphone() -> CGRect? { nil }
+    var onMicrophone: ((NSPoint) -> Void)?
     func furnitureClick(_ p: NSPoint) -> Bool {
-        for (prov, r) in cabinets() {
-            if cassetteRect(r).insetBy(dx: -3, dy: -3).contains(p) { onCassette?(prov); return true }
-            if r.contains(p) {
-                let k = type(of: self).drawScale
-                onCabinet?(prov, NSPoint(x: r.midX * k, y: r.minY * k)); return true
-            }
+        let k = type(of: self).drawScale
+        if let m = microphone(), m.insetBy(dx: -6, dy: -6).contains(p) {
+            onMicrophone?(NSPoint(x: m.midX * k, y: (m.maxY + drawOffsetY) * k)); return true
+        }
+        for (prov, r) in cabinets() where r.contains(p) {
+            onCabinet?(prov, NSPoint(x: r.midX * k, y: (r.minY + drawOffsetY) * k)); return true
         }
         return false
+    }
+    func drawMicrophone(_ cg: CGContext) {
+        guard let m = microphone() else { return }
+        let hover = hoverPoint.map { m.insetBy(dx: -6, dy: -6).contains($0) } ?? false
+        let sway = sin(t * 0.9) * 1.5
+        cg.setStrokeColor(Palette.outline.cgColor); cg.setLineWidth(1.6)
+        cg.move(to: CGPoint(x: m.midX, y: -drawOffsetY)); cg.addLine(to: CGPoint(x: m.midX + sway, y: m.minY)); cg.strokePath()
+        let x = m.midX + sway
+        // Micro de radio antiguo: rejilla redondeada con anillo dorado
+        let head = CGRect(x: x - m.width / 2, y: m.minY, width: m.width, height: m.height - 8)
+        rrect(cg, head, m.width / 2, Palette.rgb(0xB8BCC6), line: 2)
+        cg.saveGState(); cg.addPath(CGPath(roundedRect: head, cornerWidth: m.width / 2, cornerHeight: m.width / 2, transform: nil)); cg.clip()
+        cg.setStrokeColor(Palette.rgb(0x6B7080).cgColor); cg.setLineWidth(1)
+        var yy = head.minY + 4
+        while yy < head.maxY { cg.move(to: CGPoint(x: head.minX, y: yy)); cg.addLine(to: CGPoint(x: head.maxX, y: yy)); yy += 4 }
+        cg.strokePath(); cg.restoreGState()
+        rrect(cg, CGRect(x: x - m.width / 2 - 2, y: head.midY - 3, width: m.width + 4, height: 6), 3, Palette.rgb(0xC9A227), line: 1.4)
+        rrect(cg, CGRect(x: x - 4, y: head.maxY, width: 8, height: 8), 2, Palette.rgb(0x2B2B30), line: 1.4)
+        if hover {
+            ellipse(cg, CGRect(x: x - 4, y: head.minY - 12, width: 8, height: 8), Palette.rgb(0xE5484D, 0.6 + 0.4 * abs(sin(t * 5))), line: 1.2)
+            pill("🎙 hablar", center: CGPoint(x: x, y: m.maxY + 16), maxW: 90)
+        }
     }
     /// «¡Hola!»: saluda con la mano y juega con una pelota para que veas que ya ha terminado.
     func drawHello(_ cg: CGContext, handX: CGFloat, handY: CGFloat, ballX: CGFloat, floorY: CGFloat, ph: CGFloat, hand: NSColor) {
@@ -106,7 +136,6 @@ class StageView: NSView {
     func drawCabinets(_ cg: CGContext) {
         for (prov, r) in cabinets() {
             let hover = hoverPoint.map { r.contains($0) } ?? false
-            let hoverCas = hoverPoint.map { cassetteRect(r).insetBy(dx: -3, dy: -3).contains($0) } ?? false
             let body = prov == .claude ? Palette.rgb(0xC96A4A) : Palette.rgb(0x3A3D44)
             let dark = body.blended(withFraction: 0.3, of: .black) ?? body
             cg.setFillColor(NSColor.black.withAlphaComponent(0.15).cgColor)
@@ -130,23 +159,7 @@ class StageView: NSView {
                     }
                 }
             }
-            // Grabadora de casete encima
-            let c = cassetteRect(r)
-            rrect(cg, c, 4, Palette.rgb(0x2B2B30), line: 2)
-            let win = CGRect(x: c.minX + 5, y: c.minY + 4, width: c.width - 22, height: c.height - 8)
-            rrect(cg, win, 3, Palette.rgb(0xE8DCC4), line: 1.4)
-            for (n, cx) in [win.minX + win.height * 0.6, win.maxX - win.height * 0.6].enumerated() {
-                let rr = win.height * 0.32
-                ellipse(cg, CGRect(x: cx - rr, y: win.midY - rr, width: rr * 2, height: rr * 2), Palette.rgb(0x5A4632), line: 1.2)
-                let a = (hoverCas ? t * 6 : 0) + CGFloat(n)
-                cg.setStrokeColor(Palette.rgb(0xE8DCC4).cgColor); cg.setLineWidth(1.2)
-                cg.move(to: CGPoint(x: cx - cos(a) * rr * 0.7, y: win.midY - sin(a) * rr * 0.7))
-                cg.addLine(to: CGPoint(x: cx + cos(a) * rr * 0.7, y: win.midY + sin(a) * rr * 0.7)); cg.strokePath()
-            }
-            let rec = CGRect(x: c.maxX - 14, y: c.midY - 5, width: 10, height: 10)
-            ellipse(cg, rec, Palette.rgb(0xE5484D, hoverCas ? 1 : 0.75 + 0.25 * sin(t * 3)), line: 1.4)
-            if hoverCas { pill("🎙 hablar", center: CGPoint(x: c.midX, y: c.minY - 12), maxW: 90) }
-            else if hover { pill("conversaciones", center: CGPoint(x: r.midX, y: c.minY - 12), maxW: 120) }
+            if hover { pill("conversaciones", center: CGPoint(x: r.midX, y: r.minY - 12), maxW: 120) }
         }
     }
 
@@ -174,6 +187,14 @@ class StageView: NSView {
     func smokeSource(_ i: Int) -> NSPoint? { nil }
 
     func chatsChanged(from old: [Chat]) {
+        let newKeys = Set(chats.map { $0.key })
+        if !firstLoad {
+            for (i, c) in old.enumerated() where !newKeys.contains(c.key) {
+                // Se calcula con la lista vieja: es donde estaba sentado.
+                if let x = seatX(i, count: old.count) { leaving.append((c, x, t)) }
+            }
+        }
+        leaving.removeAll { t - $0.start > 4 }
         let oldKeys = Set(old.map { $0.key })
         for c in chats where !oldKeys.contains(c.key) && born[c.key] == nil {
             born[c.key] = firstLoad ? -100 : t
@@ -182,6 +203,7 @@ class StageView: NSView {
         needsDisplay = true
     }
     func age(_ c: Chat) -> CGFloat { t - (born[c.key] ?? -100) }
+
 
     // MARK: Dibujo de ayuda
 

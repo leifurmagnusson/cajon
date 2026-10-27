@@ -451,6 +451,8 @@ final class Watcher {
                 let nodes = AX.snapshot(pid: app.processIdentifier, budget: 6000)
                 let obs = p == .claude ? Watcher.claude(nodes) : Watcher.chatgpt(nodes)
                 text += "\n=== \(p.name) (\(app.bundleIdentifier ?? "")) — \(nodes.count) elementos\n"
+                let rec = p == .claude ? Watcher.claudeSidebar(nodes) : Watcher.chatgptRecents(nodes)
+                text += "  RECIENTES (\(rec.count)): " + rec.prefix(12).map { "«\($0.title)» \($0.status)" }.joined(separator: " · ") + "\n"
                 for o in obs where o.current || o.working || o.needs {
                     text += "  OBS \(o.key) «\(o.title)» actual=\(o.current) trabajando=\(o.working) teNecesita=\(o.needs)\n"
                 }
