@@ -5,6 +5,10 @@ on:
     paths-ignore:
       - 'bolitas/**'
       - '.github/workflows/bolitas.yml'
+      - 'tienda/**'
+      - '.github/workflows/tienda.yml'
+      - 'catalogo/**'
+      - 'catalogo.json'
   workflow_dispatch:
 permissions:
   contents: write
