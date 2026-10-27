@@ -1,4 +1,4 @@
-// Cajón — una estantería flotante para arrastrar y soltar (inspirada en Yoink).
+// Hold It — una estantería flotante para arrastrar y soltar (inspirada en Yoink).
 // App nativa de macOS 13+, un solo archivo, sin dependencias.
 
 import AppKit
@@ -27,11 +27,11 @@ enum Prefs {
 
 final class ShelfItem {
     let id = UUID()
-    let isClip: Bool               // true = lo creó Cajón (texto, imagen, enlace pegado)
+    let isClip: Bool               // true = lo creó Hold It (texto, imagen, enlace pegado)
     private(set) var bookmark: Data?
     private var fallback: URL
 
-    /// Siempre resuelve el marcador: si mueves el archivo en Finder, Cajón lo sigue.
+    /// Siempre resuelve el marcador: si mueves el archivo en Finder, Hold It lo sigue.
     var url: URL {
         if let b = bookmark {
             var stale = false
@@ -71,7 +71,7 @@ final class Store {
 
     private init() {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Cajon", isDirectory: true)
+            .appendingPathComponent("HoldIt", isDirectory: true)
         clipsDir = base.appendingPathComponent("Recortes", isDirectory: true)
         try? FileManager.default.createDirectory(at: clipsDir, withIntermediateDirectories: true)
         load()
@@ -280,7 +280,7 @@ final class ItemView: NSView, NSDraggingSource {
         closeBtn.target = self
         closeBtn.action = #selector(removeMe)
         closeBtn.isHidden = true
-        closeBtn.toolTip = "Quitar del cajón"
+        closeBtn.toolTip = "Quitar de Hold It"
 
         addSubview(icon); addSubview(label); addSubview(closeBtn)
         NSLayoutConstraint.activate([
@@ -357,7 +357,7 @@ final class ItemView: NSView, NSDraggingSource {
         m.addItem(withTitle: "Mostrar en Finder", action: #selector(reveal), keyEquivalent: "").target = self
         m.addItem(withTitle: "Copiar", action: #selector(copyIt), keyEquivalent: "").target = self
         m.addItem(.separator())
-        m.addItem(withTitle: "Quitar del cajón", action: #selector(removeMe), keyEquivalent: "").target = self
+        m.addItem(withTitle: "Quitar de Hold It", action: #selector(removeMe), keyEquivalent: "").target = self
         return m
     }
 
@@ -405,7 +405,7 @@ final class HeaderView: NSView, NSDraggingSource {
     required init?(coder: NSCoder) { fatalError() }
 
     func update(count: Int) {
-        label.stringValue = count == 0 ? "Cajón" : (count == 1 ? "1 elemento" : "\(count) elementos")
+        label.stringValue = count == 0 ? "Hold It" : (count == 1 ? "1 elemento" : "\(count) elementos")
         toolTip = count > 1 ? "Arrastra aquí para llevarte todo" : nil
     }
 
@@ -623,7 +623,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         panel.isReleasedWhenClosed = false
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "tray.full", accessibilityDescription: "Cajón")
+        statusItem.button?.image = NSImage(systemSymbolName: "tray.full", accessibilityDescription: "Hold It")
         let menu = NSMenu()
         menu.delegate = self
         statusItem.menu = menu
@@ -723,19 +723,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if let on = on { it.state = on ? .on : .off }
         }
         let n = Store.shared.items.count
-        let head = menu.addItem(withTitle: n == 0 ? "Cajón vacío" : (n == 1 ? "1 elemento en el cajón" : "\(n) elementos en el cajón"),
+        let head = menu.addItem(withTitle: n == 0 ? "Hold It está vacío" : (n == 1 ? "1 elemento en Hold It" : "\(n) elementos en Hold It"),
                                 action: nil, keyEquivalent: "")
         head.isEnabled = false
         menu.addItem(.separator())
-        add("Pegar en el cajón", #selector(pasteIn), key: "")
-        add("Vaciar cajón", #selector(clearAll))
+        add("Pegar en Hold It", #selector(pasteIn), key: "")
+        add("Vaciar Hold It", #selector(clearAll))
         menu.addItem(.separator())
         add("Mostrar siempre", #selector(toggleAlways), on: Prefs.alwaysVisible)
         add("Quitar al arrastrar fuera", #selector(toggleRemove), on: Prefs.removeAfterDrag)
         add("Colocar a la izquierda", #selector(toggleSide), on: Prefs.leftEdge)
         add("Abrir al iniciar sesión", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled)
         menu.addItem(.separator())
-        add("Salir de Cajón", #selector(quit), key: "q")
+        add("Salir de Hold It", #selector(quit), key: "q")
     }
 
     @objc private func pasteIn() { ingest(NSPasteboard.general) }

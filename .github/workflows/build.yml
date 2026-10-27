@@ -1,4 +1,4 @@
-name: Compilar Cajón
+name: Compilar Hold It
 on:
   push:
     branches: [main]
@@ -15,4 +15,4 @@ jobs:
       - name: Publicar versión
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "v1.0.${GITHUB_RUN_NUMBER}" dist/Cajon.zip dist/Cajon.tar.gz --title "Cajón 1.0 (build ${GITHUB_RUN_NUMBER})" --notes "Build automática"
+        run: gh release create "v1.0.${GITHUB_RUN_NUMBER}" dist/HoldIt.zip dist/HoldIt.tar.gz --title "Hold It 1.0 (build ${GITHUB_RUN_NUMBER})" --notes "Build automática"
