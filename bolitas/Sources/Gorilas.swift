@@ -42,7 +42,7 @@ final class GorilasView: StageView, NSDraggingSource {
     static let sideW: CGFloat = 64          // ancho de las paredes laterales en perspectiva
     static let topPad: CGFloat = 46          // fondo de la sala (pasillo por detrás de los gorilas)
     static let backLine: CGFloat = 152       // donde la pared del fondo toca el suelo
-    static let roofH: CGFloat = 78           // tejado con la rana y sus cajas
+    static let roofH: CGFloat = 114          // tejado con la rana y sus cajas
     override var drawOffsetY: CGFloat { GorilasView.topPad + GorilasView.roofH }
     override class func size(for count: Int) -> NSSize {
         let s = drawScale
@@ -543,7 +543,7 @@ final class GorilasView: StageView, NSDraggingSource {
     // MARK: Tejado con la rana
 
     private var roomLeft: CGFloat { max(0, tableRect.minX - 254) }
-    private var roofTop: CGFloat { -GorilasView.topPad - GorilasView.roofH + 26 }
+    private var roofTop: CGFloat { -GorilasView.topPad - GorilasView.roofH + 64 }
     private var frogX: CGFloat { W - 62 }
     private var items: [ShelfItem] { ShelfStore.shared.items }
     private func boxRect(_ i: Int) -> CGRect {
