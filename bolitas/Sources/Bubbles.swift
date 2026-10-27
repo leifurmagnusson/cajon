@@ -61,44 +61,17 @@ func ago(_ since: Date, _ now: Date = Date()) -> String {
     return "hace \(s / 3600) h"
 }
 
-final class BubblesView: NSView {
+final class BubblesView: StageView {
     static let cellW: CGFloat = 92, cellH: CGFloat = 132, pad: CGFloat = 6, r: CGFloat = 28
+    private var hover: Int? { hoverIndex }
 
-    var chats: [Chat] = [] { didSet { needsDisplay = true } }
-    var needsPermission = false
-    var t: CGFloat = 0
-    private var hover: Int?
-    private var pressIndex: Int?
-    private var pressMouse = NSPoint.zero
-    private var pressOrigin = NSPoint.zero
-    private var dragged = false
-    private var dropHover = false
-
-    var onClick: ((Chat) -> Void)?
-    var onPlaceholderClick: (() -> Void)?
-    var onMoved: ((NSPoint) -> Void)?
-    var onDrop: (([String]) -> Bool)?
-    var menuFor: ((Chat) -> NSMenu?)?
-
-    override var isFlipped: Bool { true }
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        registerForDraggedTypes([.URL, .string, NSPasteboard.PasteboardType("public.url")])
-        let ta = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
-        addTrackingArea(ta)
-    }
-    required init?(coder: NSCoder) { fatalError() }
-
-    static func size(for count: Int) -> NSSize {
+    override class func size(for count: Int) -> NSSize {
         NSSize(width: CGFloat(max(1, count)) * cellW + pad * 2, height: cellH)
     }
 
-    private func index(at p: NSPoint) -> Int? {
+    override func actorIndex(at p: NSPoint) -> Int? {
         let i = Int(floor((p.x - BubblesView.pad) / BubblesView.cellW))
-        let n = max(1, chats.count)
-        return (i >= 0 && i < n) ? i : nil
+        return (i >= 0 && i < chats.count) ? i : nil
     }
 
     // MARK: Dibujo
@@ -106,14 +79,7 @@ final class BubblesView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard let cg = NSGraphicsContext.current?.cgContext else { return }
         cg.clear(bounds)
-        if dropHover {
-            let r = bounds.insetBy(dx: 2, dy: 18)
-            let p = NSBezierPath(roundedRect: r, xRadius: 22, yRadius: 22)
-            Palette.rgb(0xFFFFFF, 0.35).setFill(); p.fill()
-            p.lineWidth = 2.5
-            p.setLineDash([7, 5], count: 2, phase: t * 20)
-            Palette.outline.withAlphaComponent(0.6).setStroke(); p.stroke()
-        }
+        drawDropHint(cg, bounds.insetBy(dx: 2, dy: 18))
         if chats.isEmpty {
             drawCell(cg, i: 0, mood: .idle, provider: nil,
                      name: needsPermission ? "Dame permiso" : "Arrastra un chat",
@@ -201,7 +167,7 @@ final class BubblesView: NSView {
             let b = CGRect(x: cx + rx * 0.5, y: cy + ry * 0.38, width: 18, height: 18)
             cg.setFillColor(Palette.badge(p).cgColor); cg.fillEllipse(in: b)
             cg.setStrokeColor(Palette.outline.cgColor); cg.setLineWidth(2); cg.strokeEllipse(in: b)
-            drawText(p.letter, font: Fonts.badge, color: .white, center: CGPoint(x: b.midX, y: b.midY))
+            drawTextB(p.letter, font: Fonts.badge, color: .white, center: CGPoint(x: b.midX, y: b.midY))
         }
         if pinned {
             // Chincheta pequeña: está fijada.
@@ -215,13 +181,13 @@ final class BubblesView: NSView {
         case .working: drawThought(cg, x: cx + rx * 0.55, y: cy - ry - 2, ph: ph)
         case .needsYou, .done:
             if let s = balloon { drawBalloon(cg, text: s, cx: cx, bottom: cy - ry - 4, urgent: mood == .needsYou, ph: ph) }
-        case .idle: drawZ(cg, x: cx + rx * 0.6, y: cy - ry * 0.6, ph: ph)
+        case .idle: drawZB(cg, x: cx + rx * 0.6, y: cy - ry * 0.6, ph: ph)
         }
 
         // Nombre y tiempo.
         drawPill(name, font: Fonts.name, color: Palette.outline, center: CGPoint(x: cx, y: groundY + 13), maxW: BubblesView.cellW - 6)
         if !sub.isEmpty {
-            drawText(sub, font: Fonts.time, color: Palette.ink(mood), center: CGPoint(x: cx, y: groundY + 30), halo: true)
+            drawTextB(sub, font: Fonts.time, color: Palette.ink(mood), center: CGPoint(x: cx, y: groundY + 30), halo: true)
         }
     }
 
@@ -343,21 +309,21 @@ final class BubblesView: NSView {
         cg.setFillColor((urgent ? Palette.alert : Palette.balloon).cgColor); cg.fillPath()
         cg.addPath(p); cg.setStrokeColor(Palette.outline.cgColor); cg.setLineWidth(1.8); cg.strokePath()
         cg.restoreGState()
-        drawText(text, font: Fonts.balloon, color: urgent ? .white : Palette.outline, center: CGPoint(x: cx, y: bottom - 15))
+        drawTextB(text, font: Fonts.balloon, color: urgent ? .white : Palette.outline, center: CGPoint(x: cx, y: bottom - 15))
     }
 
-    private func drawZ(_ cg: CGContext, x: CGFloat, y: CGFloat, ph: CGFloat) {
+    private func drawZB(_ cg: CGContext, x: CGFloat, y: CGFloat, ph: CGFloat) {
         for k in 0..<2 {
             let p = (t * 0.45 + ph * 0.1 + CGFloat(k) * 0.5).truncatingRemainder(dividingBy: 1)
             let a = sin(p * .pi)
             let size = 9 + p * 6
             let f = Fonts.rounded(size, .heavy)
-            drawText("z", font: f, color: Palette.outline.withAlphaComponent(0.55 * a),
+            drawTextB("z", font: f, color: Palette.outline.withAlphaComponent(0.55 * a),
                      center: CGPoint(x: x + p * 12, y: y - p * 22))
         }
     }
 
-    private func drawText(_ s: String, font: NSFont, color: NSColor, center: CGPoint, halo: Bool = false) {
+    private func drawTextB(_ s: String, font: NSFont, color: NSColor, center: CGPoint, halo: Bool = false) {
         var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
         if halo {
             let sh = NSShadow(); sh.shadowColor = NSColor.white.withAlphaComponent(0.95); sh.shadowBlurRadius = 3; sh.shadowOffset = .zero
@@ -381,58 +347,4 @@ final class BubblesView: NSView {
         (text as NSString).draw(at: NSPoint(x: rect.minX + 7, y: rect.minY + 2), withAttributes: attrs)
     }
 
-    // MARK: Ratón
-
-    override func mouseMoved(with event: NSEvent) {
-        let h = index(at: convert(event.locationInWindow, from: nil))
-        if h != hover { hover = h; needsDisplay = true }
-    }
-    override func mouseExited(with event: NSEvent) { hover = nil; needsDisplay = true }
-
-    override func mouseDown(with event: NSEvent) {
-        pressIndex = index(at: convert(event.locationInWindow, from: nil))
-        pressMouse = NSEvent.mouseLocation
-        pressOrigin = window?.frame.origin ?? .zero
-        dragged = false
-    }
-    override func mouseDragged(with event: NSEvent) {
-        let m = NSEvent.mouseLocation
-        let dx = m.x - pressMouse.x, dy = m.y - pressMouse.y
-        if !dragged && hypot(dx, dy) < 4 { return }
-        dragged = true
-        window?.setFrameOrigin(NSPoint(x: pressOrigin.x + dx, y: pressOrigin.y + dy))
-    }
-    override func mouseUp(with event: NSEvent) {
-        if dragged {
-            if let o = window?.frame.origin { onMoved?(o) }
-            return
-        }
-        guard let i = pressIndex else { return }
-        if chats.isEmpty { onPlaceholderClick?() }
-        else if i < chats.count { onClick?(chats[i]) }
-    }
-    override func menu(for event: NSEvent) -> NSMenu? {
-        guard let i = index(at: convert(event.locationInWindow, from: nil)), i < chats.count else { return nil }
-        return menuFor?(chats[i])
-    }
-
-    // MARK: Arrastrar un chat encima
-
-    private func strings(_ s: NSDraggingInfo) -> [String] {
-        var out: [String] = []
-        let pb = s.draggingPasteboard
-        if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] { out += urls.map { $0.absoluteString } }
-        if let str = pb.string(forType: .string) { out.append(str) }
-        return out
-    }
-    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        dropHover = true; needsDisplay = true; return .copy
-    }
-    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { .copy }
-    override func draggingExited(_ sender: NSDraggingInfo?) { dropHover = false; needsDisplay = true }
-    override func draggingEnded(_ sender: NSDraggingInfo) { dropHover = false; needsDisplay = true }
-    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        dropHover = false
-        return onDrop?(strings(sender)) ?? false
-    }
 }

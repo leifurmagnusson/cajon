@@ -12,15 +12,16 @@ final class BubblePanel: NSPanel {
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var panel: BubblePanel!
-    private var view: BubblesView!
+    private var view: StageView!
     private var statusItem: NSStatusItem!
     private var anim: Timer?
     private var lastStatusKey = ""
     private let start = Date()
+    private let smoke = SmokeOverlay()
+    private var lastFrameT: CGFloat = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let size = BubblesView.size(for: Store.shared.chats.count)
-        panel = BubblePanel(contentRect: NSRect(origin: .zero, size: size),
+        panel = BubblePanel(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100),
                             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -29,14 +30,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         panel.hidesOnDeactivate = false
         panel.isMovable = false
-        view = BubblesView(frame: NSRect(origin: .zero, size: size))
-        panel.contentView = view
-
-        view.onClick = { [weak self] c in self?.openChat(c) }
-        view.onPlaceholderClick = { [weak self] in self?.placeholderClicked() }
-        view.onMoved = { o in Prefs.origin = o }
-        view.onDrop = { [weak self] s in self?.ingest(s) ?? false }
-        view.menuFor = { [weak self] c in self?.chatMenu(c) }
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let menu = NSMenu(); menu.delegate = self
@@ -46,21 +39,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Store.shared.onNeedsYou = { _ in
             if Prefs.sound { NSSound(named: NSSound.Name("Pop"))?.play() }
         }
+        Usage.shared.onChange = { [weak self] in self?.pushUsage() }
+        Usage.shared.start()
 
-        if !AX.trusted { AX.askPermission() }
-        view.needsPermission = !AX.trusted
-        view.chats = Store.shared.chats
-        place(resize: true)
+        // El aviso de permiso de macOS solo una vez; después, se pide desde la propia app.
+        if !AX.trusted && !UserDefaults.standard.bool(forKey: "askedAX") {
+            UserDefaults.standard.set(true, forKey: "askedAX")
+            AX.askPermission()
+        }
+        buildStage()
         updateVisibility()
         refreshStatus()
 
         let watch = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             let need = !AX.trusted
-            if need != self.view.needsPermission {
-                self.view.needsPermission = need; self.view.needsDisplay = true
-
-            }
+            if need != self.view.needsPermission { self.view.needsPermission = need; self.view.needsDisplay = true }
             Watcher.shared.tick()
             Watcher.shared.checkDiagnosticRequest()
             self.refreshStatus()
@@ -71,19 +65,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         RunLoop.main.add(up, forMode: .common)
     }
 
-    // MARK: Panel
+    // MARK: Escenario (según el estilo)
+
+    private func stageClass(_ th: Theme) -> StageView.Type {
+        switch th {
+        case .bolitas: return BubblesView.self
+        case .monos: return MonosView.self
+        case .enanitos: return ElvesView.self
+        }
+    }
+
+    private func buildStage() {
+        let th = Prefs.theme
+        let cls = stageClass(th)
+        let size = cls.size(for: Store.shared.chats.count)
+        let v = cls.init(frame: NSRect(origin: .zero, size: size))
+        v.onClick = { [weak self] c in self?.openChat(c) }
+        v.onPlaceholderClick = { [weak self] in self?.placeholderClicked() }
+        v.onMoved = { o in Prefs.setOrigin(o, for: Prefs.theme) }
+        v.onDrop = { [weak self] s in self?.ingest(s) ?? false }
+        v.menuFor = { [weak self] c in self?.chatMenu(c) }
+        if let m = v as? MonosView { m.onDoorClick = { [weak self] in self?.usageClicked() } }
+        if let e = v as? ElvesView { e.onSignClick = { [weak self] in self?.usageClicked() } }
+        v.needsPermission = !AX.trusted
+        v.chats = Store.shared.chats
+        view = v
+        panel.contentView = v
+        panel.setFrame(NSRect(origin: Prefs.origin(for: th) ?? defaultOrigin(for: size), size: size), display: true)
+        place()
+        pushUsage()
+        smoke.hide()
+    }
+
+    private func pushUsage() {
+        (view as? MonosView)?.usageLines = Usage.shared.lines
+        (view as? ElvesView)?.usageLines = Usage.shared.lines
+        view?.needsDisplay = true
+    }
+
+    private func usageClicked() {
+        if Usage.shared.loggedIn { Usage.shared.refresh() } else { Usage.shared.showLogin() }
+    }
 
     private func startAnimating() {
         guard anim == nil else { return }
-        let a = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
-            self.view.t = CGFloat(Date().timeIntervalSince(self.start))
-            self.view.needsDisplay = true
-        }
+        let a = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.frameTick() }
         RunLoop.main.add(a, forMode: .common)
         anim = a
     }
-    private func stopAnimating() { anim?.invalidate(); anim = nil }
+    private func stopAnimating() { anim?.invalidate(); anim = nil; smoke.hide() }
+
+    private func frameTick() {
+        let t = CGFloat(Date().timeIntervalSince(start))
+        let dt = t - lastFrameT; lastFrameT = t
+        view.t = t
+        view.needsDisplay = true
+        if Prefs.theme == .monos {
+            var src: [NSPoint] = [], names: [String] = []
+            let f = panel.frame
+            for i in view.chats.indices {
+                if let p = view.smokeSource(i) {
+                    src.append(NSPoint(x: f.minX + p.x, y: f.maxY - p.y))
+                    names.append(view.chats[i].shortTitle)
+                }
+            }
+            smoke.step(t: t, dt: dt, sources: src, names: names, screen: panel.screen)
+        }
+    }
 
     private func updateVisibility() {
         if Prefs.hidden { panel.orderOut(nil); stopAnimating() }
@@ -93,22 +141,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func defaultOrigin(for size: NSSize) -> NSPoint {
         let s = NSScreen.main ?? NSScreen.screens.first!
         let v = s.visibleFrame
-        return NSPoint(x: v.midX - size.width / 2, y: v.maxY - size.height - 4)
+        switch Prefs.theme {
+        case .bolitas: return NSPoint(x: v.midX - size.width / 2, y: v.maxY - size.height - 4)
+        case .monos: return NSPoint(x: v.maxX - size.width - 6, y: v.minY + 2)
+        case .enanitos: return NSPoint(x: v.minX + 6, y: v.minY + 2)
+        }
     }
 
-    /// Coloca el panel; al crecer o encoger mantiene arriba y el centro donde estaban.
-    private func place(resize: Bool) {
-        let size = BubblesView.size(for: view.chats.count)
-        var frame = panel.frame
-        if let o = Prefs.origin, frame.width == 0 || frame.origin == .zero {
-            frame = NSRect(origin: o, size: size)
-        } else if frame.origin == .zero {
-            frame = NSRect(origin: defaultOrigin(for: size), size: size)
-        } else {
-            let top = frame.maxY, mid = frame.midX
-            frame = NSRect(x: mid - size.width / 2, y: top - size.height, width: size.width, height: size.height)
+    /// Coloca el panel al cambiar de tamaño: las bolitas mantienen el centro de arriba,
+    /// los monos la esquina de abajo a la derecha y los enanitos la de abajo a la izquierda.
+    private func place() {
+        let size = type(of: view).size(for: view.chats.count)
+        let old = panel.frame
+        var frame: NSRect
+        switch Prefs.theme {
+        case .bolitas: frame = NSRect(x: old.midX - size.width / 2, y: old.maxY - size.height, width: size.width, height: size.height)
+        case .monos: frame = NSRect(x: old.maxX - size.width, y: old.minY, width: size.width, height: size.height)
+        case .enanitos: frame = NSRect(x: old.minX, y: old.minY, width: size.width, height: size.height)
         }
-        // Que no se salga de ninguna pantalla.
         let onScreen = NSScreen.screens.contains { $0.frame.intersects(frame) }
         if !onScreen { frame.origin = defaultOrigin(for: size) }
         panel.setFrame(frame, display: true)
@@ -118,8 +168,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func modelChanged() {
         let before = view.chats.count
         view.chats = Store.shared.chats
-        if view.chats.count != before { place(resize: true); Prefs.origin = panel.frame.origin }
+        if view.chats.count != before { place(); Prefs.setOrigin(panel.frame.origin, for: Prefs.theme) }
         refreshStatus()
+    }
+
+    @objc private func chooseTheme(_ s: NSMenuItem) {
+        guard let raw = s.representedObject as? String, let th = Theme(rawValue: raw) else { return }
+        Prefs.theme = th
+        buildStage()
+        if Prefs.hidden { Prefs.hidden = false }
+        updateVisibility()
     }
 
     // MARK: Abrir y añadir chats
@@ -131,7 +189,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func placeholderClicked() {
         if !AX.trusted {
-            AX.askPermission()
             if let u = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
                 NSWorkspace.shared.open(u)
             }
@@ -214,7 +271,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if let on = on { it.state = on ? .on : .off }
             if sel == nil { it.isEnabled = false }
         }
-        add(Prefs.hidden ? "Enseñar las bolitas" : "Ocultar las bolitas", #selector(toggleHidden), key: "b")
+        add(Prefs.hidden ? "Enseñar" : "Ocultar", #selector(toggleHidden), key: "b")
+        let st = NSMenuItem(title: "Estilo", action: nil, keyEquivalent: "")
+        let sm = NSMenu()
+        for th in Theme.allCases {
+            let it = sm.addItem(withTitle: th.title, action: #selector(chooseTheme(_:)), keyEquivalent: "")
+            it.target = self; it.representedObject = th.rawValue; it.state = th == Prefs.theme ? .on : .off
+        }
+        st.submenu = sm; menu.addItem(st)
+        menu.addItem(.separator())
+        if Usage.shared.loggedIn {
+            for l in Usage.shared.lines { add(l, nil) }
+            add("Actualizar uso de Claude", #selector(refreshUsage))
+        } else {
+            add("Ver mi uso de Claude…", #selector(loginUsage))
+        }
         menu.addItem(.separator())
         let chats = Store.shared.chats
         if chats.isEmpty { add("Aún no hay chats", nil) }
@@ -233,7 +304,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         if !AX.trusted { add("⚠️ Dar permiso de Accesibilidad…", #selector(permission)) }
         add("Sonido cuando te necesiten", #selector(toggleSound), on: Prefs.sound)
-        add("Volver a colocar arriba en el centro", #selector(recenter))
+        add("Volver a su sitio", #selector(recenter))
         add("Abrir al iniciar sesión", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled)
         add("Guardar diagnóstico", #selector(diagnostics))
         add("Buscar actualizaciones", #selector(checkUpdates))
@@ -243,14 +314,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         add("Salir de Bolitas", #selector(quit), key: "q")
     }
 
+    @objc private func refreshUsage() { Usage.shared.refresh() }
+    @objc private func loginUsage() { Usage.shared.showLogin() }
     @objc private func toggleHidden() { Prefs.hidden.toggle(); updateVisibility() }
     @objc private func clearIdle() { Store.shared.removeIdle() }
     @objc private func permission() { placeholderClicked() }
     @objc private func toggleSound() { Prefs.sound.toggle() }
     @objc private func recenter() {
-        Prefs.origin = nil
         panel.setFrameOrigin(defaultOrigin(for: panel.frame.size))
-        Prefs.origin = panel.frame.origin
+        Prefs.setOrigin(panel.frame.origin, for: Prefs.theme)
         if Prefs.hidden { Prefs.hidden = false; updateVisibility() }
     }
     @objc private func toggleLogin() {

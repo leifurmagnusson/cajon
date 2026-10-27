@@ -18,8 +18,20 @@ for s in 16 32 128 256 512; do
   sips -z $((s*2)) $((s*2)) Resources/icon-1024.png --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
-# Firma con un requisito fijo (el identificador), para que macOS mantenga el permiso de Accesibilidad tras cada actualización.
-codesign --force --deep --sign - -r='designated => identifier "casa.magnusson.bolitas"' "$APP"
+# Firma con un certificado propio y fijo: así macOS reconoce cada versión nueva como la misma app
+# y no vuelve a pedir el permiso de Accesibilidad tras cada actualización.
+if [ -n "${CI:-}" ]; then
+  KC="$PWD/build/firma.keychain-db"
+  security create-keychain -p firma "$KC"
+  security set-keychain-settings "$KC"
+  security unlock-keychain -p firma "$KC"
+  security import signing/magnusson.p12 -k "$KC" -P magnusson -T /usr/bin/codesign
+  security set-key-partition-list -S apple-tool:,apple: -s -k firma "$KC" >/dev/null
+  security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+  codesign --force --deep --timestamp=none --keychain "$KC" --sign 99D1980B1CB13ABE7E82DA241A3623F3439C8626 "$APP"
+else
+  codesign --force --deep --sign - "$APP"
+fi
 codesign -d -r- "$APP" 2>&1 | tail -2
 cd dist
 ditto -c -k --keepParent "Bolitas.app" Bolitas.zip

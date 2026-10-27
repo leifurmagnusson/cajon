@@ -149,14 +149,15 @@ enum Prefs {
         get { UserDefaults.standard.object(forKey: "sound") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "sound") }
     }
-    static var origin: NSPoint? {
-        get {
-            guard let a = UserDefaults.standard.array(forKey: "origin") as? [Double], a.count == 2 else { return nil }
-            return NSPoint(x: a[0], y: a[1])
-        }
-        set {
-            if let p = newValue { UserDefaults.standard.set([Double(p.x), Double(p.y)], forKey: "origin") }
-            else { UserDefaults.standard.removeObject(forKey: "origin") }
-        }
+    static var theme: Theme {
+        get { Theme(rawValue: UserDefaults.standard.string(forKey: "theme") ?? "") ?? .bolitas }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "theme") }
+    }
+    static func origin(for th: Theme) -> NSPoint? {
+        guard let a = UserDefaults.standard.array(forKey: "origin." + th.rawValue) as? [Double], a.count == 2 else { return nil }
+        return NSPoint(x: a[0], y: a[1])
+    }
+    static func setOrigin(_ p: NSPoint, for th: Theme) {
+        UserDefaults.standard.set([Double(p.x), Double(p.y)], forKey: "origin." + th.rawValue)
     }
 }
