@@ -37,6 +37,13 @@ class StageView: NSView {
     var chats: [Chat] = [] { didSet { chatsChanged(from: oldValue) } }
     var needsPermission = false
     var t: CGFloat = 0
+    /// Escala del dibujo (los monos se dibujan a su tamaño "de diseño" y se encogen con esto).
+    class var drawScale: CGFloat { 1 }
+    func local(_ e: NSEvent) -> NSPoint {
+        let p = convert(e.locationInWindow, from: nil)
+        let k = type(of: self).drawScale
+        return NSPoint(x: p.x / k, y: p.y / k)
+    }
     var hoverIndex: Int?
     var hoverPoint: NSPoint?
     var dropHover = false
@@ -147,7 +154,7 @@ class StageView: NSView {
     // MARK: Ratón
 
     override func mouseMoved(with event: NSEvent) {
-        let p = convert(event.locationInWindow, from: nil)
+        let p = local(event)
         hoverPoint = p
         let h = actorIndex(at: p)
         if h != hoverIndex { hoverIndex = h }
@@ -156,7 +163,7 @@ class StageView: NSView {
     override func mouseExited(with event: NSEvent) { hoverIndex = nil; hoverPoint = nil; needsDisplay = true }
 
     override func mouseDown(with event: NSEvent) {
-        pressPoint = convert(event.locationInWindow, from: nil)
+        pressPoint = local(event)
         pressIndex = actorIndex(at: pressPoint)
         pressMouse = NSEvent.mouseLocation
         pressOrigin = window?.frame.origin ?? .zero
@@ -176,7 +183,7 @@ class StageView: NSView {
         if chats.isEmpty || needsPermission { onPlaceholderClick?() }
     }
     override func menu(for event: NSEvent) -> NSMenu? {
-        guard let i = actorIndex(at: convert(event.locationInWindow, from: nil)), i < chats.count else { return nil }
+        guard let i = actorIndex(at: local(event)), i < chats.count else { return nil }
         return menuFor?(chats[i])
     }
 

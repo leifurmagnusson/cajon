@@ -272,13 +272,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if sel == nil { it.isEnabled = false }
         }
         add(Prefs.hidden ? "Enseñar" : "Ocultar", #selector(toggleHidden), key: "b")
-        let st = NSMenuItem(title: "Estilo", action: nil, keyEquivalent: "")
-        let sm = NSMenu()
-        for th in Theme.allCases {
-            let it = sm.addItem(withTitle: th.title, action: #selector(chooseTheme(_:)), keyEquivalent: "")
-            it.target = self; it.representedObject = th.rawValue; it.state = th == Prefs.theme ? .on : .off
-        }
-        st.submenu = sm; menu.addItem(st)
         menu.addItem(.separator())
         if Usage.shared.loggedIn {
             for l in Usage.shared.lines { add(l, nil) }

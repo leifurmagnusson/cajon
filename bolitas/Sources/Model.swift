@@ -150,7 +150,7 @@ enum Prefs {
         set { UserDefaults.standard.set(newValue, forKey: "sound") }
     }
     static var theme: Theme {
-        get { Theme(rawValue: UserDefaults.standard.string(forKey: "theme") ?? "") ?? .bolitas }
+        get { .monos }   // De momento, solo los monos (bolitas y enanitos aparcados).
         set { UserDefaults.standard.set(newValue.rawValue, forKey: "theme") }
     }
     static func origin(for th: Theme) -> NSPoint? {
