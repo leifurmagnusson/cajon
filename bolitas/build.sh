@@ -18,7 +18,9 @@ for s in 16 32 128 256 512; do
   sips -z $((s*2)) $((s*2)) Resources/icon-1024.png --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
-codesign --force --deep --sign - "$APP"
+# Firma con un requisito fijo (el identificador), para que macOS mantenga el permiso de Accesibilidad tras cada actualización.
+codesign --force --deep --sign - -r='designated => identifier "casa.magnusson.bolitas"' "$APP"
+codesign -d -r- "$APP" 2>&1 | tail -2
 cd dist
 ditto -c -k --keepParent "Bolitas.app" Bolitas.zip
 tar -czf Bolitas.tar.gz "Bolitas.app"
