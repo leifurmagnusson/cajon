@@ -20,4 +20,4 @@ jobs:
       - name: Publicar versión
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "v1.0.${GITHUB_RUN_NUMBER}" dist/HoldIt.zip dist/HoldIt.tar.gz --title "Hold It (build ${GITHUB_RUN_NUMBER})" --notes "Build automática"
+        run: gh release create "v1.0.${GITHUB_RUN_NUMBER}" dist/HoldIt.zip dist/HoldIt.tar.gz --title "Hold It 2.${GITHUB_RUN_NUMBER}" --notes "Build automática"

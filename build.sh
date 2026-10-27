@@ -9,6 +9,9 @@ for arch in arm64 x86_64; do
 done
 lipo -create build/HoldIt-arm64 build/HoldIt-x86_64 -output "$APP/Contents/MacOS/HoldIt"
 cp Info.plist "$APP/Contents/Info.plist"
+BUILD="${GITHUB_RUN_NUMBER:-0}"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 2.$BUILD" "$APP/Contents/Info.plist"
 ICONSET=build/AppIcon.iconset; mkdir -p "$ICONSET"
 for s in 16 32 128 256 512; do
   sips -z $s $s Resources/icon-1024.png --out "$ICONSET/icon_${s}x${s}.png" >/dev/null

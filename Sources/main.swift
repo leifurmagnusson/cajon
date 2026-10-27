@@ -558,6 +558,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                object: nil, queue: .main) { [weak self] _ in self?.place() }
+
+        // La primera vez, que se abra sola al encender el Mac.
+        if !UserDefaults.standard.bool(forKey: "didSetupLogin") {
+            try? SMAppService.mainApp.register()
+            UserDefaults.standard.set(true, forKey: "didSetupLogin")
+        }
+        // Actualizaciones automáticas: al arrancar y cada 6 horas.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { Updater.check() }
+        let up = Timer(timeInterval: 6 * 3600, repeats: true) { _ in Updater.check() }
+        RunLoop.main.add(up, forMode: .common)
     }
 
     private func frame() {
@@ -657,6 +667,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         add("Quitar al arrastrar fuera", #selector(toggleRemove), on: Prefs.removeAfterDrag)
         add("Abrir al iniciar sesión", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled)
         menu.addItem(.separator())
+        add("Buscar actualizaciones…", #selector(checkUpdates))
+        let ver = menu.addItem(withTitle: Updater.versionText, action: nil, keyEquivalent: "")
+        ver.isEnabled = false
         add("Salir de Hold It", #selector(quit), key: "q")
     }
 
@@ -676,6 +689,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             a.runModal()
         }
     }
+    @objc private func checkUpdates() { Updater.check(manual: true) }
     @objc private func quit() { NSApp.terminate(nil) }
 }
 
