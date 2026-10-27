@@ -28,3 +28,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "v1.0.${GITHUB_RUN_NUMBER}" dist/HoldIt.zip dist/HoldIt.tar.gz --title "Hold It 2.${GITHUB_RUN_NUMBER}" --notes "Build automática"
+      - name: Enlace fijo de descarga (…/releases/download/hold-it/…zip, lo usa magnusson.casa)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view hold-it >/dev/null 2>&1 || gh release create hold-it --title "Descarga para la familia (hold-it)" --notes "Enlace fijo de descarga. Se actualiza con cada versión." --latest=false
+          gh release upload hold-it dist/HoldIt.zip --clobber

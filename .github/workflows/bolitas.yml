@@ -25,3 +25,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "bolitas-v1.${GITHUB_RUN_NUMBER}" bolitas/dist/Bolitas.zip bolitas/dist/Bolitas.tar.gz --title "Bolitas 1.${GITHUB_RUN_NUMBER}" --notes "Build automática" --latest=false
+      - name: Enlace fijo de descarga (…/releases/download/bolitas/…zip, lo usa magnusson.casa)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view bolitas >/dev/null 2>&1 || gh release create bolitas --title "Descarga para la familia (bolitas)" --notes "Enlace fijo de descarga. Se actualiza con cada versión." --latest=false
+          gh release upload bolitas bolitas/dist/Bolitas.zip --clobber

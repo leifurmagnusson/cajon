@@ -7,6 +7,11 @@ import QuickLookThumbnailing
 // MARK: - Preferencias
 
 enum Prefs {
+    /// Altura de la palma sobre el borde inferior de la pantalla (donde dejaste el brazo). nil = esquina de abajo.
+    static var armOffset: CGFloat? {
+        get { (UserDefaults.standard.object(forKey: "armOffset") as? Double).map { CGFloat($0) } }
+        set { if let v = newValue { UserDefaults.standard.set(Double(v), forKey: "armOffset") } else { UserDefaults.standard.removeObject(forKey: "armOffset") } }
+    }
     private static let d = UserDefaults.standard
     static var alwaysVisible: Bool {
         get { d.bool(forKey: "alwaysVisible") }

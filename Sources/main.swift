@@ -340,6 +340,20 @@ final class HandView: NSView, NSDraggingSource {
         return nil
     }
 
+    /// El brazo (manga y puño): agarrándolo se mueve arriba y abajo.
+    private func onArm(_ p: NSPoint) -> Bool {
+        let q = p.applying(handTransform.inverted())
+        return Art.sleeve.contains(q) || Art.cuff.contains(q)
+    }
+    var onArmDrag: ((CGFloat) -> Void)?
+    var onArmDragEnd: (() -> Void)?
+    private var armLastY: CGFloat?
+
+    override func mouseUp(with event: NSEvent) {
+        if armLastY != nil { armLastY = nil; onArmDragEnd?() }
+    }
+
+
     private func onHand(_ p: NSPoint) -> Bool {
         CGRect(x: -76, y: -16, width: 124, height: 48).contains(p.applying(handTransform.inverted()))
     }
@@ -514,6 +528,9 @@ final class HandView: NSView, NSDraggingSource {
             if event.clickCount == 2 { NSWorkspace.shared.open(items[i].url) }
             if let st = states[id] { st.ang.vel += .random(in: -0.5...0.5) }
             needsDisplay = true
+        } else if onArm(p) {
+            downTarget = -2
+            armLastY = NSEvent.mouseLocation.y
         } else if onHand(p) {
             downTarget = -1
             selected = []
@@ -526,6 +543,12 @@ final class HandView: NSView, NSDraggingSource {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if downTarget == -2, let last = armLastY {
+            let y = NSEvent.mouseLocation.y
+            armLastY = y
+            onArmDrag?(y - last)
+            return
+        }
         guard let start = downPoint, let target = downTarget else { return }
         let p = convert(event.locationInWindow, from: nil)
         guard hypot(p.x - start.x, p.y - start.y) > 3 else { return }
@@ -633,6 +656,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let width: CGFloat = 250
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if SelfInstall.moveIfNeeded() { NSApp.terminate(nil); return }
         panel = HandPanel(contentRect: NSRect(x: 0, y: 0, width: width, height: 600),
                           styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         hand = HandView(frame: NSRect(x: 0, y: 0, width: width, height: 600))
@@ -655,6 +679,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = menu
 
         Store.shared.onChange = { [weak self] in self?.modelChanged() }
+        hand.onArmDrag = { [weak self] dy in self?.moveArm(by: dy) }
+        hand.onArmDragEnd = { [weak self] in self?.hand.nudgeAll(0.5) }
         baseline = dragPB.changeCount
         place()
         hand.reload()
@@ -761,14 +787,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return NSScreen.screens.first { NSMouseInRect(p, $0.frame, false) } ?? NSScreen.main ?? NSScreen.screens[0]
     }
 
+    /// La mano sale de donde dejaste el brazo (por defecto, la esquina de abajo a la derecha).
     private func place() {
-        // La mano sale a un tercio de la altura (por encima de los monos de Bolitas, que viven abajo a la derecha).
-        let sf = mouseScreen().frame
-        let vf = mouseScreen().visibleFrame
-        let bottom = sf.minY + sf.height / 3 - 74
-        let h = min(vf.maxY - bottom, 900)
+        let screen = panel.isVisible ? (panel.screen ?? mouseScreen()) : mouseScreen()
+        let sf = screen.frame
+        let vf = screen.visibleFrame
+        let palm = clampArm(Prefs.armOffset ?? (vf.minY - sf.minY + 74), screen: screen)
+        let bottom = sf.minY + palm - 74
+        let h = max(320, min(vf.maxY - bottom, 900))
         panel.setFrame(NSRect(x: sf.maxX - width, y: bottom, width: width, height: h), display: true)
         hand.needsDisplay = true
+    }
+
+    private func clampArm(_ v: CGFloat, screen: NSScreen) -> CGFloat {
+        max(40, min(v, screen.frame.height - 340))
+    }
+
+    private func moveArm(by dy: CGFloat) {
+        guard let screen = panel.screen ?? NSScreen.main else { return }
+        let current = Prefs.armOffset ?? (screen.visibleFrame.minY - screen.frame.minY + 74)
+        Prefs.armOffset = clampArm(current + dy, screen: screen)
+        place()
     }
 
     // MARK: Menú de la barra
@@ -790,6 +829,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         add("Sacudir", #selector(shake))
         menu.addItem(.separator())
         add("Mostrar siempre la mano", #selector(toggleAlways), on: Prefs.alwaysVisible)
+        add("Volver a la esquina de abajo", #selector(resetArm))
         add("Quitar al arrastrar fuera", #selector(toggleRemove), on: Prefs.removeAfterDrag)
         add("Abrir al iniciar sesión", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled)
         menu.addItem(.separator())
@@ -801,6 +841,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func pasteIn() { ingest(NSPasteboard.general) }
     @objc private func clearAll() { Store.shared.removeAll() }
+    @objc private func resetArm() { Prefs.armOffset = nil; place() }
     @objc private func shake() { hand.nudgeAll(1.4) }
     @objc private func toggleAlways() { Prefs.alwaysVisible.toggle(); if Prefs.alwaysVisible { place() }; updateVisibility() }
     @objc private func toggleRemove() { Prefs.removeAfterDrag.toggle() }

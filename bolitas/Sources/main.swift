@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var lastFrameT: CGFloat = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if SelfInstall.moveIfNeeded() { NSApp.terminate(nil); return }
         // Una vez: los monos bajan al borde inferior de la pantalla (antes se quedaban encima del Dock).
         if !UserDefaults.standard.bool(forKey: "monosAbajoV1") {
             UserDefaults.standard.removeObject(forKey: "origin." + Theme.monos.rawValue)
