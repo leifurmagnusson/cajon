@@ -6,7 +6,7 @@
 import AppKit
 import WebKit
 
-final class Usage: NSObject, WKNavigationDelegate {
+final class Usage: NSObject, WKNavigationDelegate, WKUIDelegate {
     static let shared = Usage()
     private(set) var lines: [String] = []
     var onChange: (() -> Void)?
@@ -37,6 +37,8 @@ final class Usage: NSObject, WKNavigationDelegate {
         cfg.websiteDataStore = .default()
         let wv = WKWebView(frame: NSRect(x: 0, y: 0, width: 480, height: 680), configuration: cfg)
         wv.navigationDelegate = self
+        wv.uiDelegate = self
+        wv.customUserAgent = Usage.safariUA
         wv.load(URLRequest(url: URL(string: "https://claude.ai/login")!))
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 680), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         w.title = "Bolitas · entra en Claude para ver tu uso"
@@ -46,6 +48,29 @@ final class Usage: NSObject, WKNavigationDelegate {
         loginWindow = w; loginView = wv
         NSApp.activate(ignoringOtherApps: true)
         w.makeKeyAndOrderFront(nil)
+    }
+
+    static let safariUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
+
+    /// Inicio de sesión con Google y similares: abren una ventana nueva; la cargamos en la misma.
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+                 for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        if let u = navigationAction.request.url { webView.load(URLRequest(url: u)) }
+        return nil
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        if webView === hidden { log("error de carga: \(error.localizedDescription)"); busy = false }
+    }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        if webView === hidden { log("error de carga: \(error.localizedDescription)"); busy = false }
+    }
+
+    /// Deja constancia de la última lectura (para poder ver qué pasa si no sale el porcentaje).
+    private func log(_ s: String) {
+        let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/.bolitas")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? "\(Date())\n\(s.prefix(3000))\n".write(to: dir.appendingPathComponent("uso.txt"), atomically: true, encoding: .utf8)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -81,6 +106,7 @@ final class Usage: NSObject, WKNavigationDelegate {
             let cfg = WKWebViewConfiguration(); cfg.websiteDataStore = .default()
             hidden = WKWebView(frame: NSRect(x: 0, y: 0, width: 10, height: 10), configuration: cfg)
             hidden?.navigationDelegate = self
+            hidden?.customUserAgent = Usage.safariUA
         }
         if let id = orgID { step = 1; load("https://claude.ai/api/organizations/\(id)/usage") }
         else { step = 0; load("https://claude.ai/api/organizations") }
@@ -90,8 +116,9 @@ final class Usage: NSObject, WKNavigationDelegate {
     private func load(_ s: String) { hidden?.load(URLRequest(url: URL(string: s)!)) }
 
     private func readHidden() {
-        hidden?.evaluateJavaScript("document.body ? document.body.innerText : ''") { res, _ in
+        hidden?.evaluateJavaScript("(document.querySelector('pre') || document.body || {innerText:''}).innerText") { res, err in
             let txt = res as? String ?? ""
+            self.log("paso \(self.step) · \(self.hidden?.url?.absoluteString ?? "") · \(err?.localizedDescription ?? "ok")\n\(txt)")
             let json = try? JSONSerialization.jsonObject(with: Data(txt.utf8))
             if self.step == 0 {
                 guard let arr = json as? [[String: Any]], !arr.isEmpty else { self.failed(txt); return }

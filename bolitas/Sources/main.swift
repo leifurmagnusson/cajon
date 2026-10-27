@@ -75,6 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func stageClass(_ th: Theme) -> StageView.Type {
         switch th {
+        case .billar: return GorilasView.self
         case .bolitas: return BubblesView.self
         case .monos: return MonosView.self
         case .enanitos: return ElvesView.self
@@ -92,6 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         v.onDrop = { [weak self] s in self?.ingest(s) ?? false }
         v.menuFor = { [weak self] c in self?.chatMenu(c) }
         if let m = v as? MonosView { m.onDoorClick = { [weak self] in self?.usageClicked() } }
+        if let g = v as? GorilasView { g.onDoorClick = { [weak self] in self?.usageClicked() } }
         if let e = v as? ElvesView { e.onSignClick = { [weak self] in self?.usageClicked() } }
         v.needsPermission = !AX.trusted
         v.chats = Store.shared.chats
@@ -105,6 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func pushUsage() {
         (view as? MonosView)?.usageLines = Usage.shared.lines
+        (view as? GorilasView)?.usageLines = Usage.shared.lines
         (view as? ElvesView)?.usageLines = Usage.shared.lines
         view?.needsDisplay = true
     }
@@ -126,7 +129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let dt = t - lastFrameT; lastFrameT = t
         view.t = t
         view.needsDisplay = true
-        if Prefs.theme == .monos {
+        do {
             var src: [NSPoint] = [], names: [String] = []
             let f = panel.frame
             for i in view.chats.indices {
@@ -148,8 +151,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let s = NSScreen.main ?? NSScreen.screens.first!
         let v = s.visibleFrame
         switch Prefs.theme {
-        case .bolitas: return NSPoint(x: v.midX - size.width / 2, y: v.maxY - size.height - 4)
-        case .monos: return NSPoint(x: s.frame.maxX - size.width - 4, y: s.frame.minY)   // abajo del todo, a la altura del Dock
+        case .bolitas: return NSPoint(x: s.frame.midX - size.width / 2, y: s.frame.minY)
+        case .monos, .billar: return NSPoint(x: s.frame.maxX - size.width - 4, y: s.frame.minY)   // abajo del todo, a la altura del Dock
         case .enanitos: return NSPoint(x: v.minX + 6, y: v.minY + 2)
         }
     }
@@ -161,8 +164,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let old = panel.frame
         var frame: NSRect
         switch Prefs.theme {
-        case .bolitas: frame = NSRect(x: old.midX - size.width / 2, y: old.maxY - size.height, width: size.width, height: size.height)
-        case .monos: frame = NSRect(x: old.maxX - size.width, y: old.minY, width: size.width, height: size.height)
+        case .bolitas: frame = NSRect(x: old.midX - size.width / 2, y: old.minY, width: size.width, height: size.height)
+        case .monos, .billar: frame = NSRect(x: old.maxX - size.width, y: old.minY, width: size.width, height: size.height)
         case .enanitos: frame = NSRect(x: old.minX, y: old.minY, width: size.width, height: size.height)
         }
         let onScreen = NSScreen.screens.contains { $0.frame.intersects(frame) }
@@ -193,15 +196,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let demo = [chat("demo:a", "Nóminas octubre", .working, 95), chat("demo:b", "Carta de vinos", .needsYou, 40),
                     chat("demo:c", "Viaje Japón", .done, 300), chat("demo:d", "Planner", .idle, 900),
                     chat("demo:e", "Hold It", .working, 20)]
-        for (n, tt) in [(1, 10.0), (2, 10.37), (3, 1.0), (4, 1.9)] as [(Int, CGFloat)] {
-            let v = MonosView(frame: NSRect(origin: .zero, size: MonosView.size(for: demo.count)))
-            v.t = tt
-            v.chats = demo
-            if n >= 3 { v.born["demo:e"] = 0 }
-            v.usageLines = ["Claude · 5 horas: 42%"]
-            guard let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { continue }
-            v.cacheDisplay(in: v.bounds, to: rep)
-            try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("demo\(n).png"))
+        for th in Theme.allCases {
+            for (n, tt) in [(1, 10.0), (2, 10.4), (3, 1.0), (4, 2.0)] as [(Int, CGFloat)] {
+                let cls = stageClass(th)
+                let v = cls.init(frame: NSRect(origin: .zero, size: cls.size(for: demo.count)))
+                v.t = tt
+                v.chats = demo
+                if n >= 3 { v.born["demo:e"] = 0 }
+                (v as? MonosView)?.usageLines = ["Claude · 5 horas: 11%", "Claude · semana: 76%"]
+                (v as? GorilasView)?.usageLines = ["Claude · 5 horas: 11%", "Claude · semana: 76%"]
+                guard let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { continue }
+                v.cacheDisplay(in: v.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("demo-\(th.rawValue)-\(n).png"))
+            }
         }
     }
 
@@ -305,6 +312,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if sel == nil { it.isEnabled = false }
         }
         add(Prefs.hidden ? "Enseñar" : "Ocultar", #selector(toggleHidden), key: "b")
+        let st = NSMenuItem(title: "Estilo", action: nil, keyEquivalent: "")
+        let sm = NSMenu()
+        for th in Theme.allCases {
+            let it = sm.addItem(withTitle: th.title, action: #selector(chooseTheme(_:)), keyEquivalent: "")
+            it.target = self; it.representedObject = th.rawValue; it.state = th == Prefs.theme ? .on : .off
+        }
+        st.submenu = sm; menu.addItem(st)
         menu.addItem(.separator())
         if Usage.shared.loggedIn {
             for l in Usage.shared.lines { add(l, nil) }

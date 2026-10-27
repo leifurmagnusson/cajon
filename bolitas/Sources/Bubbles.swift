@@ -62,11 +62,16 @@ func ago(_ since: Date, _ now: Date = Date()) -> String {
 }
 
 final class BubblesView: StageView {
-    static let cellW: CGFloat = 92, cellH: CGFloat = 132, pad: CGFloat = 6, r: CGFloat = 28
+    static let cellW: CGFloat = 92, cellH: CGFloat = 168, pad: CGFloat = 6, r: CGFloat = 28
     private var hover: Int? { hoverIndex }
 
     override class func size(for count: Int) -> NSSize {
         NSSize(width: CGFloat(max(1, count)) * cellW + pad * 2, height: cellH)
+    }
+
+    override func smokeSource(_ i: Int) -> NSPoint? {
+        guard i < chats.count, chats[i].mood == .needsYou || chats[i].mood == .done else { return nil }
+        return NSPoint(x: BubblesView.pad + CGFloat(i) * BubblesView.cellW + BubblesView.cellW / 2, y: 126 - 2 * BubblesView.r)
     }
 
     override func actorIndex(at p: NSPoint) -> Int? {
@@ -105,7 +110,7 @@ final class BubblesView: StageView {
                           balloon: String?, phase ph: CGFloat, pinned: Bool = false) {
         let x0 = BubblesView.pad + CGFloat(i) * BubblesView.cellW
         let cx = x0 + BubblesView.cellW / 2
-        let groundY: CGFloat = 92
+        let groundY: CGFloat = 126
         var r = BubblesView.r
         if hover == i { r *= 1.08 }
 
@@ -116,11 +121,11 @@ final class BubblesView: StageView {
             lift = abs(sin(t * 3 + ph)) * 3
             sx = 1 + 0.045 * sin(t * 6 + ph); sy = 1 - 0.045 * sin(t * 6 + ph)
         case .needsYou:
-            let h = abs(sin(t * 5.5 + ph)); lift = h * 10
+            let h = abs(sin(t * 5.5 + ph)); lift = h * 34
             let squash = max(0, 0.25 - h) * 0.5
             sx = 1 + squash; sy = 1 - squash
         case .done:
-            let h = abs(sin(t * 3.2 + ph)); lift = h * 6
+            let h = abs(sin(t * 3.6 + ph)); lift = h * 22
             let squash = max(0, 0.2 - h) * 0.4
             sx = 1 + squash; sy = 1 - squash
         case .idle:

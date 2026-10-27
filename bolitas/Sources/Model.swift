@@ -150,8 +150,8 @@ enum Prefs {
         set { UserDefaults.standard.set(newValue, forKey: "sound") }
     }
     static var theme: Theme {
-        get { .monos }   // De momento, solo los monos (bolitas y enanitos aparcados).
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: "theme") }
+        get { Theme(rawValue: UserDefaults.standard.string(forKey: "theme2") ?? "") ?? .billar }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "theme2") }
     }
     static func origin(for th: Theme) -> NSPoint? {
         guard let a = UserDefaults.standard.array(forKey: "origin." + th.rawValue) as? [Double], a.count == 2 else { return nil }

@@ -4,10 +4,11 @@
 import AppKit
 
 enum Theme: String, CaseIterable {
-    case bolitas, monos, enanitos
+    case billar, monos, bolitas, enanitos
     var title: String {
         switch self {
-        case .bolitas: return "Bolitas (arriba)"
+        case .billar: return "Club del billar (abajo a la derecha)"
+        case .bolitas: return "Bolitas (abajo, botan cuando te necesitan)"
         case .monos: return "Monos en la oficina (abajo a la derecha)"
         case .enanitos: return "Fábrica de enanitos (abajo a la izquierda)"
         }
