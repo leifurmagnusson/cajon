@@ -24,3 +24,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "tienda-v1.${GITHUB_RUN_NUMBER}" tienda/dist/Magnusson.zip --title "Magnusson (tienda) 1.${GITHUB_RUN_NUMBER}" --notes "Build automática" --latest=false
+      - name: Enlace fijo de descarga (…/releases/download/tienda/Magnusson.zip)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view tienda >/dev/null 2>&1 || gh release create tienda --title "Magnusson — descarga para la familia" --notes "Descarga fija de la tienda de la familia. Se actualiza sola con cada versión." --latest=false
+          gh release upload tienda tienda/dist/Magnusson.zip --clobber

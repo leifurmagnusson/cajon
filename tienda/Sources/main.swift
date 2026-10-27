@@ -399,7 +399,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                                                      andEventID: AEEventID(kAEGetURL))
     }
 
+    /// Si se abre desde Descargas (o desde donde sea que no es Aplicaciones), se copia a
+    /// ~/Applications, se quita la marca de «descargado de internet» y se vuelve a abrir desde allí.
+    private func moveToApplicationsIfNeeded() -> Bool {
+        let here = Bundle.main.bundleURL.resolvingSymlinksInPath()
+        let dest = userApps.appendingPathComponent("Magnusson.app")
+        let inApps = here.path.hasPrefix(userApps.resolvingSymlinksInPath().path + "/") || here.path.hasPrefix("/Applications/")
+        guard !inApps else { return false }
+        let fm = FileManager.default
+        try? fm.createDirectory(at: userApps, withIntermediateDirectories: true)
+        let tmp = userApps.appendingPathComponent(".Magnusson-nueva.app")
+        try? fm.removeItem(at: tmp)
+        guard (try? fm.copyItem(at: here, to: tmp)) != nil else { return false }
+        run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", tmp.path])
+        if fm.fileExists(atPath: dest.path) {
+            let old = fm.temporaryDirectory.appendingPathComponent("Magnusson-anterior-\(UUID().uuidString).app")
+            try? fm.moveItem(at: dest, to: old)
+        }
+        guard (try? fm.moveItem(at: tmp, to: dest)) != nil else { return false }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "sleep 1; /usr/bin/open \"\(dest.path)\""]
+        try? p.run()
+        return true
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if moveToApplicationsIfNeeded() { NSApp.terminate(nil); return }
         buildMenu()
         let silent = ProcessInfo.processInfo.arguments.contains("--fondo")
         if !silent { showWindow() }
