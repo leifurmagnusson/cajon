@@ -144,7 +144,7 @@ final class MonosView: StageView {
             rrect(cg, CGRect(x: r.minX + 10, y: r.minY + 74, width: r.width - 20, height: 64), 4, woodDark.withAlphaComponent(0.35), line: 1.5)
             let plate = CGRect(x: r.minX + 13, y: r.minY + 26, width: r.width - 26, height: 22)
             rrect(cg, plate, 3, Palette.rgb(0xE9C46A), line: 1.5)
-            text("MONOS S.A.", Fonts.rounded(9, .black), Palette.outline, center: CGPoint(x: plate.midX, y: plate.midY))
+            text("MONOS S.A.", Fonts.rounded(7.5, .black), Palette.outline, center: CGPoint(x: plate.midX, y: plate.midY))
             ellipse(cg, CGRect(x: r.minX + 8, y: r.midY + 4, width: 9, height: 9), Palette.rgb(0xF4D35E), line: 1.8)
             if let first = usageLines.first, let pct = Rx.first(first, "[0-9]+ ?%") {
                 text(pct, Fonts.rounded(15, .black), Palette.rgb(0xFFF7E2), center: CGPoint(x: r.midX, y: r.minY + 106), halo: woodDark)
@@ -204,14 +204,14 @@ final class MonosView: StageView {
         let lidH = 40 * lidOpen
         let lidR = CGRect(x: sx - 32, y: 140 - lidH, width: 64, height: lidH)
         if c.mood == .working && lidOpen > 0.9 {
-            cg.setFillColor(Palette.rgb(0x9FD3FF, 0.30 + 0.10 * sin(t * 9 + ph)).cgColor)
+            cg.setFillColor(Palette.rgb(0x9FD3FF, 0.12 + 0.06 * sin(t * 9 + ph)).cgColor)
             cg.fillEllipse(in: CGRect(x: hx - 28, y: headY - 10, width: 56, height: 36))
         }
         rrect(cg, lidR, 5, Palette.rgb(0xC9CDD6), line: 2.2)
         if lidOpen > 0.8 {
             let b = CGMutablePath()
-            b.move(to: CGPoint(x: sx - 9, y: 114)); b.addQuadCurve(to: CGPoint(x: sx + 9, y: 112), control: CGPoint(x: sx - 1, y: 126))
-            b.addQuadCurve(to: CGPoint(x: sx - 9, y: 114), control: CGPoint(x: sx, y: 120))
+            b.move(to: CGPoint(x: sx - 7, y: 124)); b.addQuadCurve(to: CGPoint(x: sx + 7, y: 122.5), control: CGPoint(x: sx - 1, y: 133))
+            b.addQuadCurve(to: CGPoint(x: sx - 7, y: 124), control: CGPoint(x: sx, y: 128.5))
             fillStroke(cg, b, L.sticker, line: 1.4)
         }
         rrect(cg, CGRect(x: sx - 35, y: 138, width: 70, height: 5), 2, Palette.rgb(0x9AA0AC), line: 1.6)
@@ -268,7 +268,7 @@ final class MonosView: StageView {
         case .idle: sub = ""
         }
         if !sub.isEmpty, lidOpen > 0.9 {
-            text(sub, Fonts.rounded(12, .black), Palette.outline, center: CGPoint(x: sx, y: 106), halo: NSColor.white)
+            text(sub, Fonts.rounded(12, .black), Palette.outline, center: CGPoint(x: sx, y: 111), halo: NSColor.white)
         }
         let bdg = CGRect(x: sx + 38, y: 150, width: 17, height: 17)
         ellipse(cg, bdg, Palette.badge(c.provider), line: 1.6)
