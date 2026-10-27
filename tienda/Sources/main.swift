@@ -183,7 +183,7 @@ final class Shop: ObservableObject {
             UserDefaults.standard.set(r.build, forKey: "build.\(a.slug)")
             estados[a.slug] = .lista
             if a.slug == "tienda" { Installer.relaunch(dest); return }
-            if abrirAlTerminar { NSWorkspace.shared.openApplication(at: dest, configuration: .init()) }
+            if abrirAlTerminar { NSWorkspace.shared.openApplication(at: dest, configuration: .init(), completionHandler: nil) }
             try? await Task.sleep(nanoseconds: 2_500_000_000)
             estados[a.slug] = .alDia
         case .failure(let e):
@@ -194,7 +194,7 @@ final class Shop: ObservableObject {
 
     func abrir(_ a: CatalogApp) {
         guard let u = installedURL(a) else { return }
-        NSWorkspace.shared.openApplication(at: u, configuration: .init())
+        NSWorkspace.shared.openApplication(at: u, configuration: .init(), completionHandler: nil)
     }
 
     /// Actualiza en silencio todo lo instalado que tenga versión nueva (la tienda la última).
