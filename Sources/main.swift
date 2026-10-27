@@ -154,6 +154,7 @@ final class HandView: NSView, NSDraggingSource {
     private var lastMouse: NSPoint?
     private var downPoint: NSPoint?
     private var downTarget: Int?   // índice de caja, o -1 = la mano (todas)
+    private var selected: Set<UUID> = []   // cajas seleccionadas con Mayúsculas/⌘ + clic
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -192,6 +193,7 @@ final class HandView: NSView, NSDraggingSource {
         }
         for id in order where !newOrder.contains(id) { states[id] = nil; thumbs[id] = nil }
         order = newOrder
+        selected = selected.intersection(newOrder)
         needsDisplay = true
     }
 
@@ -264,6 +266,16 @@ final class HandView: NSView, NSDraggingSource {
         }
     }
 
+    /// La X para quitar: esquina superior derecha de la caja (en coordenadas de la caja).
+    private var closeRect: CGRect {
+        let r = boxRect
+        return CGRect(x: r.maxX - 19, y: r.minY + 3, width: 16, height: 16)
+    }
+
+    private func hitsClose(_ p: NSPoint, box i: Int) -> Bool {
+        closeRect.insetBy(dx: -3, dy: -3).contains(p.applying(transforms[i].inverted()))
+    }
+
     private var boxRect: CGRect {
         CGRect(x: -boxSize.width / 2, y: -boxSize.height, width: boxSize.width, height: boxSize.height)
     }
@@ -325,7 +337,7 @@ final class HandView: NSView, NSDraggingSource {
         for (i, t) in transforms.enumerated() where !draggingIDs.contains(order[i]) {
             cg.saveGState()
             cg.concatenate(t)
-            drawBox(cg, item: items[i], highlighted: hovered == i)
+            drawBox(cg, item: items[i], highlighted: hovered == i, isSelected: selected.contains(order[i]))
             cg.restoreGState()
         }
 
@@ -344,7 +356,7 @@ final class HandView: NSView, NSDraggingSource {
         cg.addPath(path); cg.setStrokeColor(Art.gloveStroke); cg.setLineWidth(1.3); cg.setLineJoin(.round); cg.strokePath()
     }
 
-    private func drawBox(_ cg: CGContext, item: ShelfItem, highlighted: Bool) {
+    private func drawBox(_ cg: CGContext, item: ShelfItem, highlighted: Bool, isSelected: Bool) {
         let s = boxSize.height / 64
         let r = boxRect
         let body = CGPath(roundedRect: r, cornerWidth: 5 * s, cornerHeight: 5 * s, transform: nil)
@@ -360,9 +372,12 @@ final class HandView: NSView, NSDraggingSource {
         cg.setStrokeColor(Art.kraftLine); cg.setLineWidth(1)
         cg.move(to: CGPoint(x: r.minX, y: r.minY + 12 * s)); cg.addLine(to: CGPoint(x: r.maxX, y: r.minY + 12 * s)); cg.strokePath()
         cg.restoreGState()
+        if isSelected {
+            cg.addPath(body); cg.setFillColor(NSColor.controlAccentColor.withAlphaComponent(0.22).cgColor); cg.fillPath()
+        }
         cg.addPath(body)
-        cg.setStrokeColor(highlighted ? NSColor.controlAccentColor.cgColor : Art.kraftStroke)
-        cg.setLineWidth(highlighted ? 2 : 1.2)
+        cg.setStrokeColor(isSelected || highlighted ? NSColor.controlAccentColor.cgColor : Art.kraftStroke)
+        cg.setLineWidth(isSelected ? 3 : (highlighted ? 2 : 1.2))
         cg.strokePath()
 
         // Etiqueta blanca con la miniatura y el nombre
@@ -385,6 +400,20 @@ final class HandView: NSView, NSDraggingSource {
         (item.url.lastPathComponent as NSString).draw(in: NSRect(x: label.minX + 3 * s, y: label.minY + 28 * s,
                                                                  width: label.width - 6 * s, height: 12 * s),
                                                       withAttributes: attrs)
+
+        if highlighted {
+            // Botón X para quitar la caja sin tener que arrastrarla.
+            let c = closeRect
+            cg.setShadow(offset: CGSize(width: 0, height: -1), blur: 3, color: NSColor(white: 0, alpha: 0.3).cgColor)
+            cg.setFillColor(NSColor(hex: 0x3A3027, alpha: 0.88).cgColor)
+            cg.fillEllipse(in: c)
+            cg.setShadow(offset: .zero, blur: 0, color: nil)
+            cg.setStrokeColor(.white); cg.setLineWidth(1.8); cg.setLineCap(.round)
+            let k: CGFloat = 4.2
+            cg.move(to: CGPoint(x: c.midX - k, y: c.midY - k)); cg.addLine(to: CGPoint(x: c.midX + k, y: c.midY + k))
+            cg.move(to: CGPoint(x: c.midX + k, y: c.midY - k)); cg.addLine(to: CGPoint(x: c.midX - k, y: c.midY + k))
+            cg.strokePath()
+        }
     }
 
     // MARK: Ratón: tocar, sacar, abrir
@@ -414,14 +443,32 @@ final class HandView: NSView, NSDraggingSource {
         let p = convert(event.locationInWindow, from: nil)
         downPoint = p
         if let i = boxIndex(at: p) {
+            let id = order[i]
+            if hovered == i && hitsClose(p, box: i) {
+                // X: fuera del montón
+                downTarget = nil
+                Store.shared.remove(items[i])
+                return
+            }
             downTarget = i
+            let flags = event.modifierFlags
+            if flags.contains(.shift) || flags.contains(.command) {
+                // Mayúsculas o ⌘ + clic: añadir o quitar de la selección
+                if selected.contains(id) { selected.remove(id) } else { selected.insert(id) }
+            } else if !selected.contains(id) {
+                selected = [id]
+            }
             if event.clickCount == 2 { NSWorkspace.shared.open(items[i].url) }
-            if let st = states[order[i]] { st.ang.vel += .random(in: -0.5...0.5) }
+            if let st = states[id] { st.ang.vel += .random(in: -0.5...0.5) }
+            needsDisplay = true
         } else if onHand(p) {
             downTarget = -1
+            selected = []
             nudgeAll(0.4)
+            needsDisplay = true
         } else {
             downTarget = nil
+            if !selected.isEmpty { selected = []; needsDisplay = true }
         }
     }
 
@@ -430,7 +477,14 @@ final class HandView: NSView, NSDraggingSource {
         let p = convert(event.locationInWindow, from: nil)
         guard hypot(p.x - start.x, p.y - start.y) > 3 else { return }
         downPoint = nil
-        let chosen: [(Int, ShelfItem)] = target >= 0 ? [(target, items[target])] : Array(items.enumerated())
+        let chosen: [(Int, ShelfItem)]
+        if target < 0 {
+            chosen = items.enumerated().map { ($0.offset, $0.element) }                                // la mano: todo
+        } else if selected.contains(order[target]) && selected.count > 1 {
+            chosen = items.enumerated().filter { selected.contains($0.element.id) }.map { ($0.offset, $0.element) }
+        } else {
+            chosen = [(target, items[target])]                                   // solo esa caja
+        }
         guard !chosen.isEmpty else { return }
         let dragItems: [NSDraggingItem] = chosen.enumerated().map { (k, pair) in
             let di = NSDraggingItem(pasteboardWriter: pair.1.url as NSURL)
