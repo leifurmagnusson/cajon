@@ -356,14 +356,15 @@ final class Watcher {
                     text += line + "\n"
                 }
             }
-            let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads", isDirectory: true)
-            try? text.write(to: dir.appendingPathComponent("Bolitas-diagnostico.txt"), atomically: true, encoding: .utf8)
+            let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/.bolitas", isDirectory: true)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try? text.write(to: dir.appendingPathComponent("diagnostico.txt"), atomically: true, encoding: .utf8)
         }
     }
 
     /// Si existe ~/Downloads/Bolitas-pedir-diagnostico, escribe el diagnóstico y borra la petición.
     func checkDiagnosticRequest() {
-        let f = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads/Bolitas-pedir-diagnostico")
+        let f = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/.bolitas/pedir-diagnostico")
         if FileManager.default.fileExists(atPath: f.path) {
             try? FileManager.default.removeItem(at: f)
             writeDiagnostics()

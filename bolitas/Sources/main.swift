@@ -261,7 +261,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     @objc private func diagnostics() {
         Watcher.shared.writeDiagnostics()
-        tell("Diagnóstico guardado", "Está en Descargas (Bolitas-diagnostico.txt).")
+        tell("Diagnóstico guardado", "Guardado para afinar la detección.")
     }
     @objc private func checkUpdates() { Updater.check(manual: true) }
     @objc private func quit() { NSApp.terminate(nil) }
