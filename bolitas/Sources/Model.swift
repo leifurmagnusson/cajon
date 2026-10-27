@@ -50,6 +50,7 @@ final class Store {
     private let key = "chats.v1"
     /// Última vez que cada chat se vio en su app (solo en memoria).
     private var lastSeen: [String: Date] = [:]
+    private let started = Date()
 
     init() {
         if let d = UserDefaults.standard.data(forKey: key),
@@ -163,11 +164,17 @@ final class Store {
             }
             if c != before { chats[k] = c; changed = true }
         }
-        // Las que la app ya no enseña (o de versiones viejas de Bolitas) no pueden seguir «trabajando».
+        // Si la app ya no tiene ese chat (lo has borrado o no lo encuentra), el gorila se va por la puerta.
+        // Solo cuando la app está abierta y sí se puede leer su lista: si no, no sabemos nada.
         let seenKeys = Set(observations.map { $0.key })
-        for k in chats.indices where running.contains(chats[k].provider) && !seenKeys.contains(chats[k].key)
-            && chats[k].mood != .idle && now.timeIntervalSince(chats[k].lastConfirmed) > 90 {
-            chats[k].mood = .idle; chats[k].since = now; changed = true
+        let readable = Set(observations.map { $0.provider })
+        if now.timeIntervalSince(started) > 40 {
+            let n = chats.count
+            chats.removeAll { c in
+                running.contains(c.provider) && readable.contains(c.provider) && !seenKeys.contains(c.key)
+                    && now.timeIntervalSince(lastSeen[c.key] ?? started) > 25
+            }
+            if chats.count != n { changed = true }
         }
         // Las que no están fijadas y llevan dos horas dormidas se van solas.
         let n = chats.count
