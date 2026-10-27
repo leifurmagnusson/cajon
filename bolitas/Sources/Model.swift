@@ -157,6 +157,13 @@ enum Prefs {
         guard let a = UserDefaults.standard.array(forKey: "origin." + th.rawValue) as? [Double], a.count == 2 else { return nil }
         return NSPoint(x: a[0], y: a[1])
     }
+    static func sizeFactor(for th: Theme) -> CGFloat {
+        let v = UserDefaults.standard.double(forKey: "size." + th.rawValue)
+        return v > 0 ? CGFloat(v) : 1
+    }
+    static func setSizeFactor(_ f: CGFloat, for th: Theme) {
+        UserDefaults.standard.set(Double(f), forKey: "size." + th.rawValue)
+    }
     static func setOrigin(_ p: NSPoint, for th: Theme) {
         UserDefaults.standard.set([Double(p.x), Double(p.y)], forKey: "origin." + th.rawValue)
     }

@@ -103,7 +103,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         v.chats = Store.shared.chats
         view = v
         panel.contentView = v
-        panel.setFrame(NSRect(origin: Prefs.origin(for: th) ?? defaultOrigin(for: size), size: size), display: true)
+        let fs = scaled(size)
+        panel.setFrame(NSRect(origin: Prefs.origin(for: th) ?? defaultOrigin(for: fs), size: fs), display: true)
         place()
         pushUsage()
         smoke.hide()
@@ -138,7 +139,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let f = panel.frame
             for i in view.chats.indices {
                 if let p = view.smokeSource(i) {
-                    src.append(NSPoint(x: f.minX + p.x, y: f.maxY - p.y))
+                    let k = Prefs.sizeFactor(for: Prefs.theme)
+                    src.append(NSPoint(x: f.minX + p.x * k, y: f.maxY - p.y * k))
                     names.append(view.chats[i].shortTitle)
                 }
             }
@@ -163,8 +165,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Coloca el panel al cambiar de tamaño: las bolitas mantienen el centro de arriba,
     /// los monos la esquina de abajo a la derecha y los enanitos la de abajo a la izquierda.
+    /// Tamaño elegido para este estilo (pequeño / mediano / grande).
+    private func scaled(_ s: NSSize) -> NSSize {
+        let f = Prefs.sizeFactor(for: Prefs.theme)
+        return NSSize(width: round(s.width * f), height: round(s.height * f))
+    }
+
     private func place() {
-        let size = type(of: view).size(for: view.chats.count)
+        let base = type(of: view).size(for: view.chats.count)
+        let size = scaled(base)
         let old = panel.frame
         var frame: NSRect
         switch Prefs.theme {
@@ -176,6 +185,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !onScreen { frame.origin = defaultOrigin(for: size) }
         panel.setFrame(frame, display: true)
         view.frame = NSRect(origin: .zero, size: size)
+        view.setBoundsSize(base)   // dibuja a su tamaño de siempre y macOS lo escala
     }
 
     private func modelChanged() {
@@ -214,6 +224,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("demo-\(th.rawValue)-\(n).png"))
             }
         }
+    }
+
+    @objc private func chooseSize(_ s: NSMenuItem) {
+        guard let f = s.representedObject as? CGFloat else { return }
+        Prefs.setSizeFactor(f, for: Prefs.theme)
+        place()
+        Prefs.setOrigin(panel.frame.origin, for: Prefs.theme)
     }
 
     @objc private func chooseTheme(_ s: NSMenuItem) {
@@ -323,6 +340,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             it.target = self; it.representedObject = th.rawValue; it.state = th == Prefs.theme ? .on : .off
         }
         st.submenu = sm; menu.addItem(st)
+        let tm = NSMenuItem(title: "Tamaño", action: nil, keyEquivalent: "")
+        let tsm = NSMenu()
+        for (name, f) in [("Pequeño", 0.75), ("Mediano", 1.0), ("Grande", 1.35)] as [(String, CGFloat)] {
+            let it = tsm.addItem(withTitle: name, action: #selector(chooseSize(_:)), keyEquivalent: "")
+            it.target = self; it.representedObject = f
+            it.state = abs(Prefs.sizeFactor(for: Prefs.theme) - f) < 0.01 ? .on : .off
+        }
+        tm.submenu = tsm; menu.addItem(tm)
         menu.addItem(.separator())
         if Usage.shared.loggedIn {
             for l in Usage.shared.lines { add(l, nil) }
