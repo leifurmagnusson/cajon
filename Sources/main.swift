@@ -301,7 +301,120 @@ final class HandView: NSView, NSDraggingSource {
 
     private var palm: CGPoint { CGPoint(x: bounds.width - 118, y: bounds.height - 74) }
 
+    // MARK: Modo techo (encima del «Club del billar» de Bolitas)
+
+    /// En modo techo no hay mano: una viga de madera a todo lo ancho; las lámparas del club cuelgan
+    /// de ella y las cajas se apilan encima, en filas.
+    var ceiling = false { didSet { if ceiling != oldValue { needsDisplay = true } } }
+    var roseXs: [CGFloat] = [] { didSet { needsDisplay = true } }
+    static let beamH: CGFloat = 18
+    static let pillarW: CGFloat = 18
+    /// Altura del club de Bolitas que queda debajo de la viga (la viga y la columna lo enmarcan en L).
+    var clubH: CGFloat = 0 { didSet { if clubH != oldValue { needsDisplay = true } } }
+    private var beamRect: CGRect {
+        CGRect(x: 0, y: bounds.height - clubH - HandView.beamH + dip.pos * 0.15, width: bounds.width, height: HandView.beamH)
+    }
+    private var pillarRect: CGRect {
+        CGRect(x: bounds.width - HandView.pillarW, y: beamRect.minY, width: HandView.pillarW, height: bounds.height - beamRect.minY)
+    }
+    private var shelfW: CGFloat { bounds.width - HandView.pillarW }
+
+    private func ceilingLayout() {
+        boxSize = CGSize(width: 86 * 0.72, height: 64 * 0.72)
+        let gap: CGFloat = 8
+        let perRow = max(1, Int((shelfW - 30) / (boxSize.width + gap)))
+        let base = beamRect.minY
+        handTransform = CGAffineTransform(translationX: 0, y: base)
+        transforms = []
+        for (i, id) in order.enumerated() {
+            let st = states[id]!
+            let col = i % perRow, row = i / perRow
+            let x = shelfW - 14 - boxSize.width / 2 - CGFloat(col) * (boxSize.width + gap)
+            let y = base - CGFloat(row) * boxSize.height
+            transforms.append(CGAffineTransform(translationX: x + st.x.pos * 0.4, y: y + st.y.pos).rotated(by: st.ang.pos * 0.6))
+        }
+    }
+
+    private func nextSlotCenter() -> CGPoint {
+        let gap: CGFloat = 8
+        let perRow = max(1, Int((shelfW - 30) / (boxSize.width + gap)))
+        let i = order.count
+        let x = shelfW - 14 - boxSize.width / 2 - CGFloat(i % perRow) * (boxSize.width + gap)
+        return CGPoint(x: x, y: beamRect.minY - CGFloat(i / perRow) * boxSize.height - boxSize.height / 2)
+    }
+
+    private func drawCeiling(_ cg: CGContext) {
+        if dragActive {
+            let c = nextSlotCenter()
+            let colors = [NSColor.controlAccentColor.withAlphaComponent(dragHover ? 0.38 : 0.16).cgColor,
+                          NSColor.controlAccentColor.withAlphaComponent(0).cgColor]
+            let g = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB), colors: colors as CFArray, locations: [0, 1])!
+            cg.drawRadialGradient(g, startCenter: c, startRadius: 0, endCenter: c, endRadius: dragHover ? 110 : 85, options: [])
+        }
+        let b = beamRect
+        // Sombra de la viga
+        cg.saveGState()
+        cg.setShadow(offset: CGSize(width: 0, height: -3), blur: 6, color: NSColor(white: 0, alpha: 0.35).cgColor)
+        cg.setFillColor(NSColor(hex: 0x3E2716).cgColor)
+        cg.fill(CGRect(x: b.minX - 2, y: b.minY, width: b.width + 4, height: b.height))
+        cg.restoreGState()
+        // Madera con degradado, moldura de arriba y vetas
+        let wood = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB),
+                              colors: [NSColor(hex: 0x8A5A33).cgColor, NSColor(hex: 0x5A3A22).cgColor] as CFArray, locations: [0, 1])!
+        cg.saveGState()
+        cg.clip(to: b)
+        cg.drawLinearGradient(wood, start: CGPoint(x: 0, y: b.minY), end: CGPoint(x: 0, y: b.maxY), options: [])
+        cg.setFillColor(NSColor(hex: 0xA8743F).cgColor)
+        cg.fill(CGRect(x: b.minX, y: b.minY, width: b.width, height: 4))
+        cg.setStrokeColor(NSColor(hex: 0x3E2716, alpha: 0.45).cgColor); cg.setLineWidth(1)
+        var vx: CGFloat = 14
+        while vx < b.width {
+            cg.move(to: CGPoint(x: vx, y: b.minY + 8)); cg.addCurve(to: CGPoint(x: vx + 40, y: b.minY + 11),
+                                                                   control1: CGPoint(x: vx + 12, y: b.minY + 6), control2: CGPoint(x: vx + 26, y: b.minY + 13))
+            vx += 63
+        }
+        cg.strokePath()
+        cg.restoreGState()
+        cg.setStrokeColor(NSColor(hex: 0x2B1A0E).cgColor); cg.setLineWidth(1.4)
+        cg.stroke(b.insetBy(dx: -1, dy: 0.7))
+        // Columna de la derecha: cierra la esquina del club en L, desde el lateral de la pantalla
+        let pr = pillarRect
+        cg.saveGState()
+        cg.setShadow(offset: CGSize(width: -3, height: 0), blur: 6, color: NSColor(white: 0, alpha: 0.35).cgColor)
+        cg.setFillColor(NSColor(hex: 0x5A3A22).cgColor); cg.fill(pr)
+        cg.restoreGState()
+        cg.saveGState(); cg.clip(to: pr)
+        cg.drawLinearGradient(wood, start: CGPoint(x: pr.minX, y: 0), end: CGPoint(x: pr.maxX, y: 0), options: [])
+        cg.setFillColor(NSColor(hex: 0xA8743F).cgColor); cg.fill(CGRect(x: pr.minX, y: pr.minY, width: 4, height: pr.height))
+        cg.restoreGState()
+        cg.setStrokeColor(NSColor(hex: 0x2B1A0E).cgColor); cg.setLineWidth(1.4)
+        cg.stroke(pr.insetBy(dx: 0.7, dy: -1))
+        // Escuadra de latón en la esquina de la L
+        let corner = CGMutablePath()
+        corner.move(to: CGPoint(x: pr.minX, y: b.maxY)); corner.addLine(to: CGPoint(x: pr.minX - 16, y: b.maxY))
+        corner.addLine(to: CGPoint(x: pr.minX, y: b.maxY + 16)); corner.closeSubpath()
+        cg.addPath(corner); cg.setFillColor(NSColor(hex: 0x5A3A22).cgColor); cg.fillPath()
+        cg.setFillColor(NSColor(hex: 0xC9A24A).cgColor)
+        cg.fillEllipse(in: CGRect(x: pr.minX - 7, y: b.maxY + 2, width: 4, height: 4))
+        // Rosetones de latón donde cuelgan las lámparas del club
+        for x in roseXs where x > 4 && x < bounds.width - 4 {
+            let r = CGRect(x: x - 7, y: b.maxY - 7, width: 14, height: 7)
+            cg.setFillColor(NSColor(hex: 0xC9A24A).cgColor)
+            cg.fillEllipse(in: r.insetBy(dx: 0, dy: -3).offsetBy(dx: 0, dy: 1.5))
+            cg.setStrokeColor(NSColor(hex: 0x7A5A1F).cgColor); cg.setLineWidth(1)
+            cg.strokeEllipse(in: r.insetBy(dx: 0, dy: -3).offsetBy(dx: 0, dy: 1.5))
+        }
+        // Cajas encima de la viga
+        for (i, t) in transforms.enumerated() where !draggingIDs.contains(order[i]) {
+            cg.saveGState()
+            cg.concatenate(t)
+            drawBox(cg, item: items[i], highlighted: hovered == i, isSelected: selected.contains(order[i]))
+            cg.restoreGState()
+        }
+    }
+
     private func computeLayout() {
+        if ceiling { ceilingLayout(); return }
         let n = max(order.count, 1)
         let avail = palm.y - 24
         let s = min(1, max(0.45, avail / (CGFloat(n) * 64 + 4)))
@@ -342,6 +455,7 @@ final class HandView: NSView, NSDraggingSource {
 
     /// El brazo (manga y puño): agarrándolo se mueve arriba y abajo.
     private func onArm(_ p: NSPoint) -> Bool {
+        if ceiling { return false }
         let q = p.applying(handTransform.inverted())
         return Art.sleeve.contains(q) || Art.cuff.contains(q)
     }
@@ -355,11 +469,17 @@ final class HandView: NSView, NSDraggingSource {
 
 
     private func onHand(_ p: NSPoint) -> Bool {
+        if ceiling { return beamRect.insetBy(dx: 0, dy: -4).contains(p) }
         CGRect(x: -76, y: -16, width: 124, height: 48).contains(p.applying(handTransform.inverted()))
     }
 
     /// Zona (en coordenadas de la vista) que debe capturar el ratón; el resto deja pasar los clics.
     func interactiveRect() -> CGRect {
+        if ceiling {
+            var r = beamRect.insetBy(dx: 0, dy: -6).union(pillarRect)
+            for t in transforms { r = r.union(boxRect.insetBy(dx: -4, dy: -4).applying(t)) }
+            return r
+        }
         var r = CGRect(x: -80, y: -20, width: 260, height: 170).applying(handTransform)
         for t in transforms { r = r.union(boxRect.insetBy(dx: -4, dy: -4).applying(t)) }
         return r
@@ -370,6 +490,7 @@ final class HandView: NSView, NSDraggingSource {
     override func draw(_ dirtyRect: NSRect) {
         guard let cg = NSGraphicsContext.current?.cgContext else { return }
         computeLayout()
+        if ceiling { drawCeiling(cg); return }
 
         if dragActive {
             let top = CGPoint(x: 0, y: -boxSize.height * CGFloat(order.count) - 40).applying(handTransform)
@@ -680,7 +801,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         Store.shared.onChange = { [weak self] in self?.modelChanged() }
         hand.onArmDrag = { [weak self] dy in self?.moveArm(by: dy) }
-        hand.onArmDragEnd = { [weak self] in self?.hand.nudgeAll(0.5) }
+        hand.onArmDragEnd = { [weak self] in self?.armDropped() }
+        DistributedNotificationCenter.default().addObserver(forName: Notification.Name("casa.magnusson.bolitas.club"),
+                                                            object: nil, queue: .main) { [weak self] n in
+            self?.clubMessage(n.object as? String)
+        }
         baseline = dragPB.changeCount
         place()
         hand.reload()
@@ -711,6 +836,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         if frameCount % 2 == 0 { watchDrag() }
         if frameCount % 120 == 0 { Store.shared.prune() }
+        if frameCount % 30 == 0 && ceilingActive { placeIfClubMoved() }
         guard panel.isVisible else { return }
 
         // Dos sub-pasos por fotograma: física más estable.
@@ -760,13 +886,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateVisibility()
     }
 
-    private var shouldShow: Bool { dragActive || !Store.shared.items.isEmpty || Prefs.alwaysVisible }
+    private var shouldShow: Bool { dragActive || !Store.shared.items.isEmpty || Prefs.alwaysVisible || ceilingActive }
 
     private var hadItems = false
 
     private func updateVisibility() {
         if !Store.shared.items.isEmpty { hadItems = true }
-        if shouldShow {
+        if ceilingActive {
+            hand.cancelGoodbye()
+            hand.slide.pos = 0; hand.slide.target = 0
+            if !panel.isVisible { place(); panel.orderFrontRegardless() }
+        } else if shouldShow {
             hand.cancelGoodbye()
             if !panel.isVisible {
                 hand.slide.pos = 1
@@ -787,8 +917,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return NSScreen.screens.first { NSMouseInRect(p, $0.frame, false) } ?? NSScreen.main ?? NSScreen.screens[0]
     }
 
+    // MARK: Techo del club (Bolitas)
+
+    private struct Club { var frame: NSRect; var visible: Bool; var theme: String; var lamps: [CGFloat]; var at: Date }
+    private var club: Club?
+    private var placedFor = ""
+    private var ceilingActive: Bool { Prefs.style == "techo" }
+    private var clubAlive: Club? {
+        guard let c = club, c.visible, Date().timeIntervalSince(c.at) < 6 else { return nil }
+        return c
+    }
+
+    private func clubMessage(_ msg: String?) {
+        guard let msg = msg else { return }
+        let parts = msg.components(separatedBy: "|")
+        guard parts.count >= 3 else { return }
+        let f = parts[0].split(separator: ",").compactMap { Double($0) }
+        guard f.count == 4 else { return }
+        let lamps = parts.count > 3 ? parts[3].split(separator: ";").compactMap { Double($0) }.map { CGFloat($0) } : []
+        club = Club(frame: NSRect(x: f[0], y: f[1], width: f[2], height: f[3]), visible: parts[1] == "1",
+                    theme: parts[2], lamps: lamps, at: Date())
+    }
+
+    private func placeIfClubMoved() {
+        let key = clubAlive.map { "\($0.frame)\($0.lamps)" } ?? "sin club"
+        if key != placedFor { place() }
+    }
+
+    /// Al soltar el brazo encima del club de Bolitas, la mano se convierte en el techo del club.
+    private func armDropped() {
+        hand.nudgeAll(0.5)
+        guard let c = clubAlive else { return }
+        let palm = NSPoint(x: panel.frame.minX + panel.frame.width - 118, y: panel.frame.minY + 74)
+        if c.frame.insetBy(dx: -60, dy: -60).contains(palm) {
+            Prefs.style = "techo"
+            place()
+            hand.nudgeAll(1.0)
+            updateVisibility()
+        }
+    }
+
+    private func placeCeiling() {
+        let screen = clubAlive.flatMap { c in NSScreen.screens.first { $0.frame.intersects(c.frame) } } ?? mouseScreen()
+        let sf = screen.frame, vf = screen.visibleFrame
+        var x = sf.maxX - 460, bottom = vf.minY, clubH: CGFloat = 0, roses: [CGFloat] = []
+        if let c = clubAlive {
+            x = c.frame.minX - 10
+            bottom = c.frame.minY
+            clubH = c.frame.height
+            roses = c.lamps
+        }
+        let w = sf.maxX - x
+        let h = clubH + HandView.beamH + 230
+        hand.ceiling = true
+        hand.clubH = clubH
+        hand.roseXs = roses.map { $0 - x }
+        panel.setFrame(NSRect(x: x, y: bottom, width: w, height: h), display: true)
+        placedFor = clubAlive.map { "\($0.frame)\($0.lamps)" } ?? "sin club"
+        hand.needsDisplay = true
+    }
+
     /// La mano sale de donde dejaste el brazo (por defecto, la esquina de abajo a la derecha).
     private func place() {
+        if ceilingActive { placeCeiling(); return }
+        hand.ceiling = false
         let screen = panel.isVisible ? (panel.screen ?? mouseScreen()) : mouseScreen()
         let sf = screen.frame
         let vf = screen.visibleFrame
@@ -829,7 +1021,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         add("Sacudir", #selector(shake))
         menu.addItem(.separator())
         add("Mostrar siempre la mano", #selector(toggleAlways), on: Prefs.alwaysVisible)
-        add("Volver a la esquina de abajo", #selector(resetArm))
+        menu.addItem(.separator())
+        let st = menu.addItem(withTitle: "Estilo", action: nil, keyEquivalent: ""); st.isEnabled = false
+        add("Mano de camarero", #selector(styleHand), on: !ceilingActive)
+        add("Techo del club (encima de Bolitas)", #selector(styleCeiling), on: ceilingActive)
+        if !ceilingActive { add("Volver a la esquina de abajo", #selector(resetArm)) }
         add("Quitar al arrastrar fuera", #selector(toggleRemove), on: Prefs.removeAfterDrag)
         add("Abrir al iniciar sesión", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled)
         menu.addItem(.separator())
@@ -841,6 +1037,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func pasteIn() { ingest(NSPasteboard.general) }
     @objc private func clearAll() { Store.shared.removeAll() }
+    @objc private func styleHand() { Prefs.style = "mano"; place(); updateVisibility() }
+    @objc private func styleCeiling() { Prefs.style = "techo"; place(); updateVisibility() }
     @objc private func resetArm() { Prefs.armOffset = nil; place() }
     @objc private func shake() { hand.nudgeAll(1.4) }
     @objc private func toggleAlways() { Prefs.alwaysVisible.toggle(); if Prefs.alwaysVisible { place() }; updateVisibility() }

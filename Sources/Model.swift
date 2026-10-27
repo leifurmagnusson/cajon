@@ -7,6 +7,11 @@ import QuickLookThumbnailing
 // MARK: - Preferencias
 
 enum Prefs {
+    /// «mano» (camarero) o «techo» (viga en L encima del club de Bolitas).
+    static var style: String {
+        get { UserDefaults.standard.string(forKey: "style") ?? "mano" }
+        set { UserDefaults.standard.set(newValue, forKey: "style") }
+    }
     /// Altura de la palma sobre el borde inferior de la pantalla (donde dejaste el brazo). nil = esquina de abajo.
     static var armOffset: CGFloat? {
         get { (UserDefaults.standard.object(forKey: "armOffset") as? Double).map { CGFloat($0) } }

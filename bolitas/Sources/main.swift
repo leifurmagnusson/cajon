@@ -22,6 +22,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if SelfInstall.moveIfNeeded() { NSApp.terminate(nil); return }
+        // Cuenta a Hold It dónde está el club, para que ponga el techo justo encima (y sus cajas).
+        let link = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in self?.tellHoldIt() }
+        RunLoop.main.add(link, forMode: .common)
         // Una vez: los monos bajan al borde inferior de la pantalla (antes se quedaban encima del Dock).
         if !UserDefaults.standard.bool(forKey: "monosAbajoV1") {
             UserDefaults.standard.removeObject(forKey: "origin." + Theme.monos.rawValue)
@@ -428,6 +431,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.activate(ignoringOtherApps: true)
         a.runModal()
     }
+
+    // MARK: Hold It (techo del club)
+    private var lastLink = ""
+    private var lastLinkAt = Date.distantPast
+    private func tellHoldIt() {
+        guard let panel = panel, let view = view else { return }
+        let f = panel.frame
+        let lamps = ((view as? GorilasView)?.lampXs() ?? []).map { String(format: "%.1f", f.minX + $0) }.joined(separator: ";")
+        let visible = panel.isVisible && !Prefs.hidden
+        let msg = String(format: "%.1f,%.1f,%.1f,%.1f|%d|%@|%@", f.minX, f.minY, f.width, f.height, visible ? 1 : 0, Prefs.theme.rawValue, lamps)
+        guard msg != lastLink || Date().timeIntervalSince(lastLinkAt) > 2 else { return }
+        lastLink = msg; lastLinkAt = Date()
+        DistributedNotificationCenter.default().postNotificationName(Notification.Name("casa.magnusson.bolitas.club"),
+                                                                     object: msg, userInfo: nil, deliverImmediately: true)
+    }
+
 }
 
 let app = NSApplication.shared
