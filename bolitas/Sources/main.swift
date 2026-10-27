@@ -57,11 +57,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if need != self.view.needsPermission { self.view.needsPermission = need; self.view.needsDisplay = true }
             Watcher.shared.tick()
             Watcher.shared.checkDiagnosticRequest()
+            self.checkDemoRequest()
             self.refreshStatus()
         }
         RunLoop.main.add(watch, forMode: .common)
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { Updater.check() }
-        let up = Timer(timeInterval: 3 * 3600, repeats: true) { _ in Updater.check() }
+        let up = Timer(timeInterval: 10 * 60, repeats: true) { _ in Updater.check() }
         RunLoop.main.add(up, forMode: .common)
     }
 
@@ -170,6 +171,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         view.chats = Store.shared.chats
         if view.chats.count != before { place(); Prefs.setOrigin(panel.frame.origin, for: Prefs.theme) }
         refreshStatus()
+    }
+
+    /// Si existe ~/Applications/.bolitas/pedir-demo, dibuja una escena de prueba con monos en
+    /// todos los estados y la guarda como demo.png (para revisar el diseño sin tocar la pantalla).
+    private func checkDemoRequest() {
+        let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/.bolitas")
+        let req = dir.appendingPathComponent("pedir-demo")
+        guard FileManager.default.fileExists(atPath: req.path) else { return }
+        try? FileManager.default.removeItem(at: req)
+        let now = Date()
+        func chat(_ k: String, _ title: String, _ m: Mood, _ ago: Double) -> Chat {
+            Chat(key: k, provider: .claude, title: title, chatID: nil, pinned: false, mood: m,
+                 since: now.addingTimeInterval(-ago), lastConfirmed: now, evidence: .current, lastActive: now)
+        }
+        let demo = [chat("demo:a", "Nóminas octubre", .working, 95), chat("demo:b", "Carta de vinos", .needsYou, 40),
+                    chat("demo:c", "Viaje Japón", .done, 300), chat("demo:d", "Planner", .idle, 900),
+                    chat("demo:e", "Hold It", .working, 20)]
+        for (n, tt) in [(1, 10.0), (2, 10.37), (3, 1.0), (4, 1.9)] as [(Int, CGFloat)] {
+            let v = MonosView(frame: NSRect(origin: .zero, size: MonosView.size(for: demo.count)))
+            v.t = tt
+            v.chats = demo
+            if n >= 3 { v.born["demo:e"] = 0 }
+            v.usageLines = ["Claude · 5 horas: 42%"]
+            guard let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { continue }
+            v.cacheDisplay(in: v.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("demo\(n).png"))
+        }
     }
 
     @objc private func chooseTheme(_ s: NSMenuItem) {
