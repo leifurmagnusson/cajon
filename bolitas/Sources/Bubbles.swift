@@ -70,7 +70,7 @@ final class BubblesView: StageView {
     }
 
     override func smokeSource(_ i: Int) -> NSPoint? {
-        guard i < chats.count, chats[i].mood == .needsYou || chats[i].mood == .done else { return nil }
+        guard i < chats.count, chats[i].mood == .needsYou else { return nil }
         return NSPoint(x: BubblesView.pad + CGFloat(i) * BubblesView.cellW + BubblesView.cellW / 2, y: 126 - 2 * BubblesView.r)
     }
 

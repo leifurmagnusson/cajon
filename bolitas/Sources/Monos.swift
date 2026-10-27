@@ -70,7 +70,7 @@ final class MonosView: StageView {
     }
     /// De dónde sale el humo (en puntos de la vista, ya escalados).
     override func smokeSource(_ i: Int) -> NSPoint? {
-        guard i < chats.count, chats[i].mood == .needsYou || chats[i].mood == .done, age(chats[i]) > 2.6 else { return nil }
+        guard i < chats.count, chats[i].mood == .needsYou, age(chats[i]) > 2.6 else { return nil }
         let k = MonosView.drawScale
         return NSPoint(x: slotX(i) * k, y: 50 * k)
     }
@@ -242,7 +242,10 @@ final class MonosView: StageView {
             // indicador verde de trabajando
             let dot = CGRect(x: sx - 38, y: 100, width: 10, height: 10)
             ellipse(cg, dot, Palette.rgb(0x5BD16B, 0.6 + 0.4 * abs(sin(t * 4))), line: 1.6)
-        case .needsYou, .done:
+        case .done:
+            ellipse(cg, CGRect(x: sx - 42, y: 128, width: 15, height: 12), hand, line: 1.8)
+            drawHello(cg, handX: sx + 40, handY: headY - 10, ballX: sx - 26, floorY: 141, ph: ph, hand: hand)
+        case .needsYou:
             // golpea la mesa con el puño
             let bang: CGFloat = abs(sin(t * (c.mood == .needsYou ? 9 : 5) + ph)) * 10
             ellipse(cg, CGRect(x: sx + 28, y: 124 - bang, width: 16, height: 14), hand, line: 1.8)
@@ -253,7 +256,7 @@ final class MonosView: StageView {
             ellipse(cg, CGRect(x: sx + 17, y: 96, width: 15, height: 11), hand, line: 1.8)
             z(cg, x: hx + 26, y: headY - 24, ph: ph)
         }
-        if waiting {
+        if c.mood == .needsYou {
             // vapor saliendo por las orejas
             for s in [-1.0, 1.0] as [CGFloat] {
                 for n in 0..<2 {

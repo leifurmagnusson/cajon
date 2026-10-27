@@ -75,7 +75,7 @@ final class GorilasView: StageView {
     }
     /// Sale humo de la punta del puro.
     override func smokeSource(_ i: Int) -> NSPoint? {
-        guard i < chats.count, chats[i].mood == .needsYou || chats[i].mood == .done, age(chats[i]) > 2.4 else { return nil }
+        guard i < chats.count, chats[i].mood == .needsYou, age(chats[i]) > 2.4 else { return nil }
         let k = GorilasView.drawScale
         return NSPoint(x: (slotX(i) + 36) * k, y: (headY(chats[i]) + 12) * k)
     }
@@ -290,7 +290,11 @@ final class GorilasView: StageView {
             let r: CGFloat = sin(t * 16 + ph + 1.7) > 0 ? 3 : -2
             ellipse(cg, CGRect(x: x - 42, y: T - 14 + l, width: 17, height: 13), hand, line: 1.8)
             ellipse(cg, CGRect(x: x + 25, y: T - 14 + r, width: 17, height: 13), hand, line: 1.8)
-        case .needsYou, .done:
+        case .done:
+            // Ya ha terminado: te saluda y juega con una bola de billar para que lo veas
+            ellipse(cg, CGRect(x: x - 42, y: T - 14, width: 17, height: 13), hand, line: 1.8)
+            drawHello(cg, handX: x + 38, handY: y - 14, ballX: x - 30, floorY: T, ph: ph, hand: hand)
+        case .needsYou:
             // Brazos cruzados sobre la mesa, esperando
             rrect(cg, CGRect(x: x - 38, y: T - 13, width: 76, height: 12), 6, L.vest, line: 1.8)
             ellipse(cg, CGRect(x: x - 42, y: T - 15, width: 15, height: 13), hand, line: 1.6)
@@ -441,7 +445,7 @@ final class GorilasView: StageView {
             cg.fill(CGRect(x: x - 17, y: ey - 3, width: 6, height: 1.6)); cg.fill(CGRect(x: x + 6, y: ey - 3, width: 6, height: 1.6))
         }
         // Puro cuando te espera
-        if mood == .needsYou || mood == .done {
+        if mood == .needsYou {
             cg.saveGState()
             cg.translateBy(x: x + 10, y: my); cg.rotate(by: -0.22)
             rrect(cg, CGRect(x: 0, y: -2.5, width: 26, height: 6), 3, Palette.rgb(0x6B4423), line: 1.4)

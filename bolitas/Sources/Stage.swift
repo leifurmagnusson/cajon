@@ -75,6 +75,33 @@ class StageView: NSView {
         }
         return false
     }
+    /// «¡Hola!»: saluda con la mano y juega con una pelota para que veas que ya ha terminado.
+    func drawHello(_ cg: CGContext, handX: CGFloat, handY: CGFloat, ballX: CGFloat, floorY: CGFloat, ph: CGFloat, hand: NSColor) {
+        let wave = sin(t * 9 + ph) * 6
+        ellipse(cg, CGRect(x: handX - 8 + wave, y: handY - 8, width: 16, height: 16), hand, line: 1.8)
+        cg.setStrokeColor(Palette.outline.cgColor); cg.setLineWidth(1.4)
+        for k in 0..<3 {   // dedos
+            cg.move(to: CGPoint(x: handX - 5 + CGFloat(k) * 5 + wave, y: handY - 7))
+            cg.addLine(to: CGPoint(x: handX - 6 + CGFloat(k) * 6 + wave * 1.2, y: handY - 13))
+        }
+        cg.strokePath()
+        if sin(t * 1.3 + ph) > -0.2 {
+            balloon(cg, "¡hola!", center: CGPoint(x: handX + 6, y: handY - 30), urgent: false, wobble: sin(t * 4 + ph) * 0.08)
+        }
+        // pelota botando
+        let h = abs(sin(t * 4.2 + ph))
+        let r: CGFloat = 7
+        let by = floorY - r - h * 30
+        let squash = h < 0.12 ? 1.25 : 1
+        let br = CGRect(x: ballX - r * squash, y: by - r / squash + (squash > 1 ? 2 : 0), width: r * 2 * squash, height: r * 2 / squash)
+        ellipse(cg, br, Palette.rgb(0xE5484D), line: 1.6)
+        cg.saveGState(); cg.addEllipse(in: br); cg.clip()
+        cg.setFillColor(NSColor.white.cgColor); cg.fill(CGRect(x: br.minX, y: br.midY - 2, width: br.width, height: 4))
+        cg.restoreGState()
+        cg.setFillColor(NSColor.black.withAlphaComponent(0.15 * (1 - h)).cgColor)
+        cg.fillEllipse(in: CGRect(x: ballX - 8, y: floorY - 2, width: 16, height: 4))
+    }
+
     func drawCabinets(_ cg: CGContext) {
         for (prov, r) in cabinets() {
             let hover = hoverPoint.map { r.contains($0) } ?? false

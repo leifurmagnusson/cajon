@@ -221,9 +221,10 @@ final class Watcher {
     static func claudeStatus(_ s: String) -> (working: Bool, needs: Bool, reply: Bool) {
         let l = s.lowercased()
         if Rx.m(l, "(esperando entrada|waiting for input|needs input|necesita (permiso|aprobaci)|needs (approval|permission)|awaiting (approval|input))") { return (false, true, false) }
-        if Rx.m(l, "(esperando respuesta|waiting for (a )?(response|reply|you)|needs (your )?(response|reply)|awaiting (response|reply)|tu turno|your turn)") { return (false, false, true) }
+        // «Esperando respuesta»: te ha hecho una pregunta → también te pide algo.
+        if Rx.m(l, "(esperando respuesta|waiting for (a )?(response|reply|you)|needs (your )?(response|reply)|awaiting (response|reply))") { return (false, true, false) }
         if Rx.m(l, "(en ejecuci|ejecutando|running|working|trabajando|pensando|thinking|generando|generating)") { return (true, false, false) }
-        if Rx.m(l, "esperando|waiting") { return (false, false, true) }
+        if Rx.m(l, "esperando|waiting") { return (false, true, false) }
         return (false, false, false)
     }
 

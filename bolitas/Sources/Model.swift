@@ -33,6 +33,7 @@ struct Chat: Codable, Equatable {
     var lastConfirmed: Date    // última vez que vimos el estado confirmado
     var evidence: Evidence
     var lastActive: Date       // última vez que estuvo verde o amarilla
+    var seen: Bool? = nil      // ya has entrado a mirarlo desde que terminó
 
     var shortTitle: String {
         let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -110,12 +111,18 @@ final class Store {
             let viewing = o.current && frontmost.contains(o.provider)
             if o.fromSidebar { c.evidence = .sidebar }
             if o.reply {
-                if c.mood != .done { c.mood = .done; c.since = now; onNeedsYou?(c) }
+                // Ha terminado y espera tu respuesta: saluda hasta que entres a mirarlo; después, duerme.
+                if viewing { c.seen = true }
+                if c.seen == true {
+                    if c.mood != .idle { c.mood = .idle; c.since = now }
+                } else if c.mood != .done { c.mood = .done; c.since = now; onNeedsYou?(c) }
                 c.lastConfirmed = now; c.lastActive = now
             } else if o.needs {
+                c.seen = false
                 if c.mood != .needsYou { c.mood = .needsYou; c.since = now; onNeedsYou?(c) }
                 c.lastConfirmed = now; c.lastActive = now
             } else if o.working {
+                c.seen = false
                 if c.mood != .working { c.mood = .working; c.since = now }
                 c.evidence = o.current ? .current : .sidebar
                 c.lastConfirmed = now; c.lastActive = now
@@ -126,14 +133,15 @@ final class Store {
                     // lo dejamos en verde un rato prudencial antes de darlo por terminado.
                     let stillUnknown = !o.current && c.evidence == .current && now.timeIntervalSince(c.lastConfirmed) < 20 * 60
                     if !stillUnknown {
-                        if viewing || o.fromSidebar { c.mood = .idle } else { c.mood = .done; onNeedsYou?(c) }
+                        // Ha terminado: saluda hasta que entres a mirarlo.
+                        if viewing { c.mood = .idle } else { c.mood = .done; onNeedsYou?(c) }
                         c.since = now; c.lastActive = now
                     }
                 case .needsYou:
                     // Si la app ya no dice que espera, es que ya le has contestado.
                     c.mood = (viewing || o.fromSidebar) ? .idle : .done; c.since = now; c.lastActive = now
                 case .done:
-                    if viewing || o.fromSidebar { c.mood = .idle; c.since = now }
+                    if viewing { c.mood = .idle; c.since = now }
                 case .idle: break
                 }
             }
