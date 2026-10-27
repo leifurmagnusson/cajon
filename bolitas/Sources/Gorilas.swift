@@ -65,9 +65,9 @@ final class GorilasView: StageView {
     }
     private func headY(_ c: Chat) -> CGFloat {
         switch c.mood {
-        case .working: return 92 + sin(t * 4 + ph(c)) * 1.2
-        case .needsYou, .done: return 88
-        case .idle: return 98
+        case .working: return 84 + sin(t * 4 + ph(c)) * 1.2
+        case .needsYou, .done: return 80
+        case .idle: return 94
         }
     }
     private func ph(_ c: Chat) -> CGFloat { CGFloat(seed(c.key) % 100) / 15 }
@@ -248,7 +248,7 @@ final class GorilasView: StageView {
         let T = GorilasView.tableTop
         let lidOpen: CGFloat = a < 2.3 ? ease((a - 1.6) / 0.7) : 1
         // Portátil (por detrás)
-        let lidH = 36 * lidOpen
+        let lidH = 30 * lidOpen
         if c.mood == .working && lidOpen > 0.9 {
             cg.setFillColor(Palette.rgb(0x9FD3FF, 0.10 + 0.05 * sin(t * 9 + ph)).cgColor)
             cg.fillEllipse(in: CGRect(x: x - 30, y: y - 10, width: 60, height: 40))
@@ -257,9 +257,9 @@ final class GorilasView: StageView {
         rrect(cg, CGRect(x: x - 33, y: T - 4, width: 66, height: 5), 2, (L.laptop.blended(withFraction: 0.25, of: .black) ?? L.laptop), line: 1.6)
         if lidOpen > 0.8 {
             // Logo: una bola ocho
-            ellipse(cg, CGRect(x: x - 7, y: T - 30, width: 14, height: 14), Palette.rgb(0x111111), line: 1.2)
-            ellipse(cg, CGRect(x: x - 3.5, y: T - 26.5, width: 7, height: 7), .white, line: 0)
-            text("8", Fonts.rounded(6, .black), Palette.rgb(0x111111), center: CGPoint(x: x, y: T - 23))
+            ellipse(cg, CGRect(x: x - 6, y: T - 25, width: 12, height: 12), Palette.rgb(0x111111), line: 1.2)
+            ellipse(cg, CGRect(x: x - 3, y: T - 22, width: 6, height: 6), .white, line: 0)
+            text("8", Fonts.rounded(5, .black), Palette.rgb(0x111111), center: CGPoint(x: x, y: T - 19))
         }
         let hand = L.face.blended(withFraction: 0.1, of: .black) ?? L.face
         switch c.mood {
@@ -293,7 +293,7 @@ final class GorilasView: StageView {
         case .needsYou, .done: sub = ago(c.since)
         case .idle: break
         }
-        if !sub.isEmpty && lidOpen > 0.9 { text(sub, Fonts.rounded(11, .black), Palette.outline, center: CGPoint(x: x, y: T - 9), halo: .white) }
+        if !sub.isEmpty { text(sub, Fonts.rounded(11, .black), Palette.rgb(0xF2E8CF), center: CGPoint(x: x - 8, y: T + 48), halo: Palette.rgb(0x2A1F1A)) }
         if c.mood == .idle { z(cg, x: x + 28, y: y - 28, ph: ph) }
         let bdg = CGRect(x: x + 40, y: T + 40, width: 16, height: 16)
         ellipse(cg, bdg, Palette.badge(c.provider), line: 1.6)
