@@ -148,6 +148,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let dt = t - lastFrameT; lastFrameT = t
         view.t = t
         view.needsDisplay = true
+        Frog.shared.step(t: t, dt: dt, mouth: (view as? GorilasView)?.frogMouthScreen())
         do {
             var src: [NSPoint] = [], names: [String] = []
             let f = panel.frame
@@ -420,6 +421,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         add("Quitar las que están en gris", #selector(clearIdle))
         menu.addItem(.separator())
         if !AX.trusted { add("⚠️ Dar permiso de Accesibilidad…", #selector(permission)) }
+        if Prefs.theme == .billar {
+            add("Rana del tejado: atrapa lo que arrastras", #selector(toggleFrog), on: Frog.shared.enabled)
+            if !ShelfStore.shared.items.isEmpty { add("Vaciar el tejado (\(ShelfStore.shared.items.count))", #selector(clearRoof)) }
+        }
         add("Sonido cuando te necesiten", #selector(toggleSound), on: Prefs.sound)
         add("Volver a su sitio", #selector(recenter))
         add("Abrir al iniciar sesión", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled)
@@ -436,6 +441,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleHidden() { Prefs.hidden.toggle(); updateVisibility() }
     @objc private func clearIdle() { Store.shared.removeIdle() }
     @objc private func permission() { placeholderClicked() }
+    @objc private func toggleFrog() { Frog.shared.enabled.toggle() }
+    @objc private func clearRoof() { ShelfStore.shared.removeAll() }
     @objc private func toggleSound() { Prefs.sound.toggle() }
     @objc private func recenter() {
         panel.setFrameOrigin(defaultOrigin(for: panel.frame.size))

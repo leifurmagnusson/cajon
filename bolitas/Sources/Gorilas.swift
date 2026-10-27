@@ -31,7 +31,7 @@ struct GorillaLook {
     }
 }
 
-final class GorilasView: StageView {
+final class GorilasView: StageView, NSDraggingSource {
     static let cellW: CGFloat = 110, H: CGFloat = 220, floor: CGFloat = 204, doorW: CGFloat = 80, doorH: CGFloat = 160
     static let tableTop: CGFloat = 146
     override class var drawScale: CGFloat { 0.62 }
@@ -42,10 +42,11 @@ final class GorilasView: StageView {
     static let sideW: CGFloat = 64          // ancho de las paredes laterales en perspectiva
     static let topPad: CGFloat = 46          // fondo de la sala (pasillo por detrás de los gorilas)
     static let backLine: CGFloat = 152       // donde la pared del fondo toca el suelo
-    override var drawOffsetY: CGFloat { GorilasView.topPad }
+    static let roofH: CGFloat = 78           // tejado con la rana y sus cajas
+    override var drawOffsetY: CGFloat { GorilasView.topPad + GorilasView.roofH }
     override class func size(for count: Int) -> NSSize {
         let s = drawScale
-        return NSSize(width: (40 + 290 + CGFloat(max(1, count)) * cellW + 170) * s, height: (H + topPad) * s)
+        return NSSize(width: (40 + 290 + CGFloat(max(1, count)) * cellW + 170) * s, height: (H + topPad + roofH) * s)
     }
     private func look(_ c: Chat) -> GorillaLook {
         if let l = looks[c.key] { return l }
@@ -87,7 +88,7 @@ final class GorilasView: StageView {
     override func smokeSource(_ i: Int) -> NSPoint? {
         guard i < chats.count, chats[i].mood == .needsYou, age(chats[i]) > GorilasView.sitAt + 0.5 else { return nil }
         let k = GorilasView.drawScale
-        return NSPoint(x: (slotX(i) + 36) * k, y: (headY(chats[i]) + 12 + GorilasView.topPad) * k)
+        return NSPoint(x: (slotX(i) + 36) * k, y: (headY(chats[i]) + 12 + drawOffsetY) * k)
     }
     private func headY(_ c: Chat) -> CGFloat {
         switch c.mood {
@@ -98,14 +99,6 @@ final class GorilasView: StageView {
     }
     private func ph(_ c: Chat) -> CGFloat { CGFloat(seed(c.key) % 100) / 15 }
 
-    override func mouseUp(with event: NSEvent) {
-        let p = local(event)
-        if doorRect.insetBy(dx: -6, dy: -6).contains(p) && actorIndex(at: p) == nil {
-            if chats.isEmpty && needsPermission { onPlaceholderClick?() } else { onDoorClick?() }
-            return
-        }
-        super.mouseUp(with: event)
-    }
 
     // MARK: Escena
 
@@ -114,9 +107,10 @@ final class GorilasView: StageView {
         cg.clear(bounds)
         let k = GorilasView.drawScale
         cg.saveGState(); cg.scaleBy(x: k, y: k)
-        cg.translateBy(x: 0, y: GorilasView.topPad)
+        cg.translateBy(x: 0, y: drawOffsetY)
         cg.setLineCap(.round); cg.setLineJoin(.round)
         drawRoom(cg)
+        drawRoof(cg)
         drawDropHint(cg, CGRect(x: 2, y: 20 - GorilasView.topPad, width: W - 4, height: GorilasView.H + GorilasView.topPad - 24))
 
         // La puerta se abre cuando alguien entra o sale, y luego se cierra.
@@ -545,6 +539,182 @@ final class GorilasView: StageView {
     }
 
     // MARK: El salón (pared, suelo en perspectiva y butacas)
+
+    // MARK: Tejado con la rana
+
+    private var roomLeft: CGFloat { max(0, tableRect.minX - 254) }
+    private var roofTop: CGFloat { -GorilasView.topPad - GorilasView.roofH + 26 }
+    private var frogX: CGFloat { W - 62 }
+    private var items: [ShelfItem] { ShelfStore.shared.items }
+    private func boxRect(_ i: Int) -> CGRect {
+        CGRect(x: roomLeft + 74 + CGFloat(i) * 40, y: roofTop - 30, width: 34, height: 30)
+    }
+    private func boxIndex(at p: NSPoint) -> Int? {
+        let n = min(items.count, maxBoxes)
+        return (0..<n).first { boxRect($0).insetBy(dx: -2, dy: -2).contains(p) }
+    }
+    private var maxBoxes: Int { max(1, Int((frogX - 50 - roomLeft - 74) / 40)) }
+
+    /// Boca de la rana en coordenadas de pantalla (para la lengua).
+    func frogMouthScreen() -> NSPoint? {
+        guard let w = window else { return nil }
+        let k = GorilasView.drawScale
+        let p = NSPoint(x: (frogX - 16) * k, y: (roofTop - 14 + drawOffsetY) * k)
+        return w.convertPoint(toScreen: convert(p, to: nil))
+    }
+
+    private func drawRoof(_ cg: CGContext) {
+        let left = roomLeft, base = -GorilasView.topPad, top = roofTop
+        let roof = CGMutablePath()
+        roof.move(to: CGPoint(x: left - 6, y: base)); roof.addLine(to: CGPoint(x: W + 2, y: base))
+        roof.addLine(to: CGPoint(x: W - 26, y: top)); roof.addLine(to: CGPoint(x: left + 24, y: top)); roof.closeSubpath()
+        fillStroke(cg, roof, Palette.rgb(0xB5562F), line: 2.2)
+        // Tejas
+        cg.saveGState(); cg.addPath(roof); cg.clip()
+        cg.setStrokeColor(Palette.rgb(0x8A3A1C).cgColor); cg.setLineWidth(1.6)
+        var row = top + 10
+        var shift: CGFloat = 0
+        while row < base + 4 {
+            var x = left - 20 + shift
+            while x < W + 20 {
+                cg.addArc(center: CGPoint(x: x + 9, y: row), radius: 9, startAngle: 0, endAngle: .pi, clockwise: false)
+                cg.strokePath(); x += 18
+            }
+            row += 11; shift = shift == 0 ? 9 : 0
+        }
+        cg.restoreGState()
+        // Chimenea
+        let ch = CGRect(x: left + 34, y: top - 30, width: 26, height: 34)
+        rrect(cg, ch, 2, Palette.rgb(0x8A4A2F), line: 2)
+        rrect(cg, CGRect(x: ch.minX - 4, y: ch.minY - 4, width: ch.width + 8, height: 7), 2, Palette.rgb(0x6B3A24), line: 1.8)
+        // Cajas que se ha tragado la rana
+        let n = min(items.count, maxBoxes)
+        for i in 0..<n { drawBox(cg, items[i], boxRect(i), hover: hoverPoint.map { boxRect(i).contains($0) } ?? false) }
+        if items.count > n { pill("+\(items.count - n)", center: CGPoint(x: boxRect(n).minX + 16, y: boxRect(n).midY), maxW: 50) }
+        drawFrogOnRoof(cg)
+    }
+
+    private func drawBox(_ cg: CGContext, _ it: ShelfItem, _ r: CGRect, hover: Bool) {
+        let rr = hover ? r.offsetBy(dx: 0, dy: -3) : r
+        rrect(cg, rr, 2, Palette.rgb(0xC9935A), line: 1.8)
+        cg.setFillColor(Palette.rgb(0xE8C27A, 0.9).cgColor); cg.fill(CGRect(x: rr.midX - 3, y: rr.minY, width: 6, height: rr.height))
+        cg.setStrokeColor(Palette.outline.cgColor); cg.setLineWidth(1)
+        cg.move(to: CGPoint(x: rr.minX, y: rr.minY + 7)); cg.addLine(to: CGPoint(x: rr.maxX, y: rr.minY + 7)); cg.strokePath()
+        // Icono del archivo y nombre
+        let icon = NSWorkspace.shared.icon(forFile: it.url.path)
+        icon.draw(in: CGRect(x: rr.midX - 8, y: rr.minY + 9, width: 16, height: 16), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        if hover {
+            pill(it.url.lastPathComponent, center: CGPoint(x: rr.midX, y: rr.minY - 12), maxW: 180)
+        }
+    }
+
+    private func drawFrogOnRoof(_ cg: CGContext) {
+        let x = frogX, y = roofTop
+        let st = Frog.shared.state
+        let gulp = st == .swallowing ? sin(CGFloat(Date().timeIntervalSinceReferenceDate - Double(Frog.shared.swallowStart)) * 12) * 3 : 0
+        let green = Palette.rgb(0x5DBB63), dark = Palette.rgb(0x2E7D32)
+        // Patas y cuerpo
+        ellipse(cg, CGRect(x: x - 30, y: y - 10, width: 20, height: 10), green, line: 1.8)
+        ellipse(cg, CGRect(x: x + 10, y: y - 10, width: 20, height: 10), green, line: 1.8)
+        ellipse(cg, CGRect(x: x - 26 - gulp, y: y - 36 - gulp, width: 52 + gulp * 2, height: 34 + gulp), green, line: 2.2)
+        ellipse(cg, CGRect(x: x - 16, y: y - 22, width: 32, height: 16), Palette.rgb(0xC8E6A0), line: 0)
+        // Ojos saltones que miran al cursor
+        let m = window.map { NSEvent.mouseLocation.x - $0.frame.midX } ?? 0
+        for s in [-1.0, 1.0] as [CGFloat] {
+            let e = CGRect(x: x + s * 12 - 9, y: y - 50, width: 18, height: 18)
+            ellipse(cg, e, green, line: 2)
+            ellipse(cg, e.insetBy(dx: 3, dy: 3), .white, line: 1.2)
+            let blink = st == .resting && (t.truncatingRemainder(dividingBy: 5.3)) < 0.12
+            if blink {
+                cg.setFillColor(green.cgColor); cg.fill(e.insetBy(dx: 3, dy: 3))
+            } else {
+                let px = max(-2.5, min(2.5, m / 300))
+                cg.setFillColor(Palette.outline.cgColor)
+                cg.fillEllipse(in: CGRect(x: e.midX - 3 + px, y: e.midY - 3, width: 6, height: 7))
+            }
+        }
+        // Boca: abierta cuando caza
+        if st == .catching {
+            ellipse(cg, CGRect(x: x - 20, y: y - 22, width: 14, height: 9), Palette.rgb(0x8E2C3B), line: 1.6)
+        } else {
+            cg.setStrokeColor(dark.cgColor); cg.setLineWidth(1.8)
+            cg.move(to: CGPoint(x: x - 18, y: y - 20)); cg.addQuadCurve(to: CGPoint(x: x + 18, y: y - 20), control: CGPoint(x: x, y: y - 13)); cg.strokePath()
+        }
+        cg.setFillColor(Palette.cheek.cgColor)
+        cg.fillEllipse(in: CGRect(x: x - 24, y: y - 26, width: 8, height: 5)); cg.fillEllipse(in: CGRect(x: x + 16, y: y - 26, width: 8, height: 5))
+        if !Frog.shared.enabled {
+            z(cg, x: x + 20, y: y - 52, ph: 0)
+        } else if st == .letGo {
+            balloon(cg, "¡vale, vale!", center: CGPoint(x: x - 20, y: y - 66), urgent: false, wobble: 0)
+        }
+    }
+
+    // MARK: Sacar cajas del tejado
+
+    private var boxPress: (index: Int, at: NSPoint)?
+    override func mouseDown(with event: NSEvent) {
+        let p = local(event)
+        if let i = boxIndex(at: p) {
+            boxPress = (i, p)
+            if event.clickCount == 2, i < items.count { NSWorkspace.shared.open(items[i].url); boxPress = nil }
+            return
+        }
+        boxPress = nil
+        super.mouseDown(with: event)
+    }
+    override func mouseDragged(with event: NSEvent) {
+        guard let bp = boxPress else { super.mouseDragged(with: event); return }
+        let p = local(event)
+        guard hypot(p.x - bp.at.x, p.y - bp.at.y) > 4, bp.index < items.count else { return }
+        let it = items[bp.index]
+        boxPress = nil
+        let di = NSDraggingItem(pasteboardWriter: it.url as NSURL)
+        let k = GorilasView.drawScale
+        let r = boxRect(bp.index)
+        di.setDraggingFrame(NSRect(x: r.minX * k, y: (r.minY + drawOffsetY) * k, width: r.width * k, height: r.height * k),
+                            contents: NSWorkspace.shared.icon(forFile: it.url.path))
+        Frog.shared.draggingOut = true
+        draggedItem = it
+        beginDraggingSession(with: [di], event: event, source: self)
+    }
+    override func mouseUp(with event: NSEvent) {
+        if boxPress != nil { boxPress = nil; return }
+        let p = local(event)
+        if doorRect.insetBy(dx: -6, dy: -6).contains(p) && actorIndex(at: p) == nil {
+            if chats.isEmpty && needsPermission { onPlaceholderClick?() } else { onDoorClick?() }
+            return
+        }
+        super.mouseUp(with: event)
+    }
+    private var draggedItem: ShelfItem?
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        context == .outsideApplication ? [.copy, .move, .generic] : []
+    }
+    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        Frog.shared.draggingOut = false
+        if operation != [], let it = draggedItem { ShelfStore.shared.remove(it) }   // te lo llevas: la caja desaparece
+        draggedItem = nil
+    }
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let p = local(event)
+        if let i = boxIndex(at: p), i < items.count {
+            let it = items[i]
+            let m = NSMenu()
+            let h = m.addItem(withTitle: it.url.lastPathComponent, action: nil, keyEquivalent: ""); h.isEnabled = false
+            m.addItem(withTitle: "Abrir", action: #selector(boxOpen(_:)), keyEquivalent: "").representedObject = it
+            m.addItem(withTitle: "Mostrar en Finder", action: #selector(boxReveal(_:)), keyEquivalent: "").representedObject = it
+            m.addItem(withTitle: "Quitar del tejado", action: #selector(boxRemove(_:)), keyEquivalent: "").representedObject = it
+            m.addItem(.separator())
+            m.addItem(withTitle: "Vaciar el tejado", action: #selector(boxClear), keyEquivalent: "")
+            for x in m.items { x.target = self }
+            return m
+        }
+        return super.menu(for: event)
+    }
+    @objc private func boxOpen(_ s: NSMenuItem) { if let it = s.representedObject as? ShelfItem { NSWorkspace.shared.open(it.url) } }
+    @objc private func boxReveal(_ s: NSMenuItem) { if let it = s.representedObject as? ShelfItem { NSWorkspace.shared.activateFileViewerSelecting([it.url]) } }
+    @objc private func boxRemove(_ s: NSMenuItem) { if let it = s.representedObject as? ShelfItem { ShelfStore.shared.remove(it) } }
+    @objc private func boxClear() { ShelfStore.shared.removeAll() }
 
     private func drawRoom(_ cg: CGContext) {
         let F = GorilasView.floor, H = GorilasView.H
