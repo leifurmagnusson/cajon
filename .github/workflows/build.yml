@@ -11,8 +11,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Compilar
-        run: ./build.sh
+        run: |
+          set -o pipefail
+          ./build.sh 2>&1 | tee build.log
+      - name: Mostrar errores
+        if: failure()
+        run: grep -E "error:" build.log | head -25 | sed 's/^/::error::/' || true
       - name: Publicar versión
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "v1.0.${GITHUB_RUN_NUMBER}" dist/HoldIt.zip dist/HoldIt.tar.gz --title "Hold It 1.0 (build ${GITHUB_RUN_NUMBER})" --notes "Build automática"
+        run: gh release create "v1.0.${GITHUB_RUN_NUMBER}" dist/HoldIt.zip dist/HoldIt.tar.gz --title "Hold It (build ${GITHUB_RUN_NUMBER})" --notes "Build automática"
