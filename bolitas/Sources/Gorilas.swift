@@ -42,11 +42,11 @@ final class GorilasView: StageView, NSDraggingSource {
     static let sideW: CGFloat = 64          // ancho de las paredes laterales en perspectiva
     static let topPad: CGFloat = 46          // fondo de la sala (pasillo por detrás de los gorilas)
     static let backLine: CGFloat = 152       // donde la pared del fondo toca el suelo
-    static let roofH: CGFloat = 114          // tejado con la rana y sus cajas
+    static let roofH: CGFloat = 146          // tejado con la rana y sus cajas
     override var drawOffsetY: CGFloat { GorilasView.topPad + GorilasView.roofH }
     override class func size(for count: Int) -> NSSize {
         let s = drawScale
-        return NSSize(width: (40 + 290 + CGFloat(max(1, count)) * cellW + 170) * s, height: (H + topPad + roofH) * s)
+        return NSSize(width: (40 + 186 + CGFloat(max(1, count)) * cellW + 170) * s, height: (H + topPad + roofH) * s)
     }
     private func look(_ c: Chat) -> GorillaLook {
         if let l = looks[c.key] { return l }
@@ -69,14 +69,14 @@ final class GorilasView: StageView, NSDraggingSource {
     }
 
     override func cabinets() -> [(Provider, CGRect)] {
-        let x0 = tableRect.minX - 232
-        let bottom = GorilasView.tableTop + 40
-        return [(.claude, CGRect(x: x0, y: bottom - 84, width: 54, height: 84)),
-                (.chatgpt, CGRect(x: x0 + 62, y: bottom - 84, width: 54, height: 84))]
+        let x0 = tableRect.minX - 118, T = GorilasView.tableTop
+        return [(.claude, CGRect(x: x0, y: T - 44, width: 76, height: 40)),
+                (.chatgpt, CGRect(x: x0, y: T - 4, width: 76, height: 40))]
     }
 
     override func microphone() -> CGRect? {
-        CGRect(x: tableRect.minX - 104, y: GorilasView.tableTop - 62, width: 80, height: 102)
+        // El gramófono, encima del mueble
+        CGRect(x: tableRect.minX - 120, y: GorilasView.tableTop - 49 - 100, width: 80, height: 100)
     }
     static let sitAt: CGFloat = 2.3      // a partir de aquí ya está sentado
 
@@ -542,8 +542,8 @@ final class GorilasView: StageView, NSDraggingSource {
 
     // MARK: Tejado con la rana
 
-    private var roomLeft: CGFloat { max(0, tableRect.minX - 254) }
-    private var roofTop: CGFloat { -GorilasView.topPad - GorilasView.roofH + 64 }
+    private var roomLeft: CGFloat { max(0, tableRect.minX - 150) }
+    private var roofTop: CGFloat { -GorilasView.topPad - GorilasView.roofH + 96 }
     private var frogX: CGFloat { W - 62 }
     private var items: [ShelfItem] { ShelfStore.shared.items }
     private func boxRect(_ i: Int) -> CGRect {
@@ -591,7 +591,64 @@ final class GorilasView: StageView, NSDraggingSource {
         let n = min(items.count, maxBoxes)
         for i in 0..<n { drawBox(cg, items[i], boxRect(i), hover: hoverPoint.map { boxRect(i).contains($0) } ?? false) }
         if items.count > n { pill("+\(items.count - n)", center: CGPoint(x: boxRect(n).minX + 16, y: boxRect(n).midY), maxW: 50) }
+        drawClothesline(cg)
         drawFrogOnRoof(cg)
+    }
+
+    // MARK: Tendedero del portapapeles
+
+    private var lineY: CGFloat { roofTop - 74 }
+    private var lineX0: CGFloat { roomLeft + 52 }
+    private var lineX1: CGFloat { frogX - 44 }
+    private var clips: [ClipItem] { ClipStore.shared.ordered }
+    private var maxNotes: Int { max(1, Int((lineX1 - lineX0 - 10) / 36)) }
+    private func noteRect(_ i: Int) -> CGRect {
+        let x = lineX0 + 8 + CGFloat(i) * 36
+        let f = (x - lineX0) / max(1, lineX1 - lineX0)
+        let sag = sin(f * .pi) * 6
+        return CGRect(x: x, y: lineY + sag + 3, width: 30, height: 24)
+    }
+    private func noteIndex(at p: NSPoint) -> Int? {
+        let n = min(clips.count, maxNotes)
+        return (0..<n).first { noteRect($0).insetBy(dx: -2, dy: -3).contains(p) }
+    }
+
+    private func drawClothesline(_ cg: CGContext) {
+        // Postes y cuerda
+        rrect(cg, CGRect(x: lineX0 - 3, y: lineY - 4, width: 6, height: roofTop - lineY + 4), 2, Palette.rgb(0x5A3A22), line: 1.6)
+        rrect(cg, CGRect(x: lineX1 - 3, y: lineY - 4, width: 6, height: roofTop - lineY + 4), 2, Palette.rgb(0x5A3A22), line: 1.6)
+        let rope = CGMutablePath()
+        rope.move(to: CGPoint(x: lineX0, y: lineY)); rope.addQuadCurve(to: CGPoint(x: lineX1, y: lineY), control: CGPoint(x: (lineX0 + lineX1) / 2, y: lineY + 12))
+        cg.addPath(rope); cg.setStrokeColor(Palette.rgb(0xE8DCC4).cgColor); cg.setLineWidth(1.6); cg.strokePath()
+        let n = min(clips.count, maxNotes)
+        if clips.isEmpty {
+            text("copia algo y lo cuelgo aquí", Fonts.rounded(9, .heavy), Palette.rgb(0xF2E8CF, 0.8), center: CGPoint(x: (lineX0 + lineX1) / 2, y: lineY + 16), halo: Palette.rgb(0x2A1F18))
+        }
+        for i in 0..<n {
+            let it = clips[i]
+            let r = noteRect(i)
+            let hover = hoverPoint.map { r.insetBy(dx: -2, dy: -3).contains($0) } ?? false
+            let swing = sin(t * 1.4 + CGFloat(i)) * 0.05 + (hover ? 0.1 : 0)
+            cg.saveGState()
+            cg.translateBy(x: r.midX, y: r.minY); cg.rotate(by: swing)
+            let paper = CGRect(x: -r.width / 2, y: 0, width: r.width, height: r.height)
+            rrect(cg, paper, 2, it.pinned ? Palette.rgb(0xFFE58F) : Palette.rgb(0xFBF8F1), line: 1.4)
+            cg.setStrokeColor(Palette.rgb(0x9AA0AC, 0.7).cgColor); cg.setLineWidth(0.8)
+            for k in 0..<3 { cg.move(to: CGPoint(x: paper.minX + 4, y: 9 + CGFloat(k) * 5)); cg.addLine(to: CGPoint(x: paper.maxX - 4 - CGFloat(k % 2) * 6, y: 9 + CGFloat(k) * 5)) }
+            cg.strokePath()
+            let label = String(it.preview.prefix(6))
+            text(label, Fonts.rounded(6.5, .heavy), Palette.outline, center: CGPoint(x: 0, y: 7))
+            // Pinza de la ropa (roja si está fijado)
+            rrect(cg, CGRect(x: -3, y: -5, width: 6, height: 10), 1.5, it.pinned ? Palette.rgb(0xE5484D) : Palette.rgb(0xC9935A), line: 1)
+            cg.restoreGState()
+            if hover {
+                pill((it.pinned ? "📌 " : "") + it.preview, center: CGPoint(x: min(max(r.midX, 120), W - 140), y: r.maxY + 14), maxW: 260)
+            }
+            if let lc = ClipStore.shared.lastCopied, lc.id == it.id, Date().timeIntervalSince(lc.at) < 1.2 {
+                balloon(cg, "¡copiado!", center: CGPoint(x: r.midX, y: r.minY - 12), urgent: false, wobble: 0)
+            }
+        }
+        if clips.count > n { pill("+\(clips.count - n)", center: CGPoint(x: lineX1 + 16, y: lineY + 12), maxW: 44) }
     }
 
     private func drawBox(_ cg: CGContext, _ it: ShelfItem, _ r: CGRect, hover: Bool) {
@@ -652,8 +709,11 @@ final class GorilasView: StageView, NSDraggingSource {
     // MARK: Sacar cajas del tejado
 
     private var boxPress: (index: Int, at: NSPoint)?
+    private var notePress: Int?
     override func mouseDown(with event: NSEvent) {
         let p = local(event)
+        if let i = noteIndex(at: p) { notePress = i; return }
+        notePress = nil
         if let i = boxIndex(at: p) {
             boxPress = (i, p)
             if event.clickCount == 2, i < items.count { NSWorkspace.shared.open(items[i].url); boxPress = nil }
@@ -678,6 +738,11 @@ final class GorilasView: StageView, NSDraggingSource {
         beginDraggingSession(with: [di], event: event, source: self)
     }
     override func mouseUp(with event: NSEvent) {
+        if let i = notePress {
+            notePress = nil
+            if i < clips.count { ClipStore.shared.copy(clips[i]) }      // un clic: lo vuelve a copiar
+            return
+        }
         if boxPress != nil { boxPress = nil; return }
         let p = local(event)
         if doorRect.insetBy(dx: -6, dy: -6).contains(p) && actorIndex(at: p) == nil {
@@ -697,6 +762,18 @@ final class GorilasView: StageView, NSDraggingSource {
     }
     override func menu(for event: NSEvent) -> NSMenu? {
         let p = local(event)
+        if let i = noteIndex(at: p), i < clips.count {
+            let it = clips[i]
+            let m = NSMenu()
+            let h = m.addItem(withTitle: it.preview, action: nil, keyEquivalent: ""); h.isEnabled = false
+            m.addItem(withTitle: "Copiar", action: #selector(noteCopy(_:)), keyEquivalent: "").representedObject = it.id
+            m.addItem(withTitle: it.pinned ? "Quitar el pin" : "📌 Fijar", action: #selector(notePin(_:)), keyEquivalent: "").representedObject = it.id
+            m.addItem(withTitle: "Borrar", action: #selector(noteRemove(_:)), keyEquivalent: "").representedObject = it.id
+            m.addItem(.separator())
+            m.addItem(withTitle: "Borrar los no fijados", action: #selector(noteClear), keyEquivalent: "")
+            for x in m.items { x.target = self }
+            return m
+        }
         if let i = boxIndex(at: p), i < items.count {
             let it = items[i]
             let m = NSMenu()
@@ -711,6 +788,10 @@ final class GorilasView: StageView, NSDraggingSource {
         }
         return super.menu(for: event)
     }
+    @objc private func noteCopy(_ s: NSMenuItem) { if let id = s.representedObject as? String, let it = clips.first(where: { $0.id == id }) { ClipStore.shared.copy(it) } }
+    @objc private func notePin(_ s: NSMenuItem) { if let id = s.representedObject as? String { ClipStore.shared.togglePin(id) } }
+    @objc private func noteRemove(_ s: NSMenuItem) { if let id = s.representedObject as? String { ClipStore.shared.remove(id) } }
+    @objc private func noteClear() { ClipStore.shared.clearUnpinned() }
     @objc private func boxOpen(_ s: NSMenuItem) { if let it = s.representedObject as? ShelfItem { NSWorkspace.shared.open(it.url) } }
     @objc private func boxReveal(_ s: NSMenuItem) { if let it = s.representedObject as? ShelfItem { NSWorkspace.shared.activateFileViewerSelecting([it.url]) } }
     @objc private func boxRemove(_ s: NSMenuItem) { if let it = s.representedObject as? ShelfItem { ShelfStore.shared.remove(it) } }
@@ -719,7 +800,7 @@ final class GorilasView: StageView, NSDraggingSource {
     private func drawRoom(_ cg: CGContext) {
         let F = GorilasView.floor, H = GorilasView.H
         let back: CGFloat = GorilasView.backLine          // donde la pared del fondo toca el suelo
-        let left = max(0, tableRect.minX - 254)
+        let left = max(0, tableRect.minX - 150)
         let top = -GorilasView.topPad
         let sw = GorilasView.sideW
         let bl = left + sw, br = W - sw                   // esquinas de la pared del fondo

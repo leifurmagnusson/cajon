@@ -149,6 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         view.t = t
         view.needsDisplay = true
         Frog.shared.step(t: t, dt: dt, mouth: (view as? GorilasView)?.frogMouthScreen())
+        if Int(t * 30) % 10 == 0 { ClipStore.shared.poll() }
         do {
             var src: [NSPoint] = [], names: [String] = []
             let f = panel.frame
@@ -421,6 +422,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         add("Quitar las que están en gris", #selector(clearIdle))
         menu.addItem(.separator())
         if !AX.trusted { add("⚠️ Dar permiso de Accesibilidad…", #selector(permission)) }
+        // Portapapeles (como CopyClip): lo fijado arriba y lo último copiado debajo
+        let cm = NSMenuItem(title: "Portapapeles", action: nil, keyEquivalent: "")
+        let csm = NSMenu()
+        let clipList = ClipStore.shared.ordered
+        if clipList.isEmpty { let e = csm.addItem(withTitle: "Aún no has copiado nada", action: nil, keyEquivalent: ""); e.isEnabled = false }
+        for it in clipList.prefix(25) {
+            let ci = csm.addItem(withTitle: (it.pinned ? "📌 " : "") + it.preview, action: #selector(clipCopy(_:)), keyEquivalent: "")
+            ci.target = self; ci.representedObject = it.id
+        }
+        if !clipList.isEmpty {
+            csm.addItem(.separator())
+            let cl = csm.addItem(withTitle: "Borrar los no fijados", action: #selector(clipClear), keyEquivalent: ""); cl.target = self
+        }
+        cm.submenu = csm; menu.addItem(cm)
         if Prefs.theme == .billar {
             add("Rana del tejado: atrapa lo que arrastras", #selector(toggleFrog), on: Frog.shared.enabled)
             if !ShelfStore.shared.items.isEmpty { add("Vaciar el tejado (\(ShelfStore.shared.items.count))", #selector(clearRoof)) }
@@ -441,6 +456,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleHidden() { Prefs.hidden.toggle(); updateVisibility() }
     @objc private func clearIdle() { Store.shared.removeIdle() }
     @objc private func permission() { placeholderClicked() }
+    @objc private func clipCopy(_ s: NSMenuItem) {
+        if let id = s.representedObject as? String, let it = ClipStore.shared.items.first(where: { $0.id == id }) { ClipStore.shared.copy(it) }
+    }
+    @objc private func clipClear() { ClipStore.shared.clearUnpinned() }
     @objc private func toggleFrog() { Frog.shared.enabled.toggle() }
     @objc private func clearRoof() { ShelfStore.shared.removeAll() }
     @objc private func toggleSound() { Prefs.sound.toggle() }

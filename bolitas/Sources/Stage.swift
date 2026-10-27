@@ -166,33 +166,36 @@ class StageView: NSView {
         cg.fillEllipse(in: CGRect(x: ballX - 8, y: floorY - 2, width: 16, height: 4))
     }
 
+    /// Un solo mueble negro con un cajón para Claude y otro para ChatGPT.
     func drawCabinets(_ cg: CGContext) {
-        for (prov, r) in cabinets() {
+        let cabs = cabinets()
+        guard !cabs.isEmpty else { return }
+        let all = cabs.map { $0.1 }.reduce(cabs[0].1) { $0.union($1) }
+        let body = all.insetBy(dx: -5, dy: -5)
+        cg.setFillColor(NSColor.black.withAlphaComponent(0.18).cgColor)
+        cg.fillEllipse(in: CGRect(x: body.minX - 4, y: body.maxY - 4, width: body.width + 8, height: 8))
+        rrect(cg, CGRect(x: body.minX + 4, y: body.maxY - 2, width: 7, height: 6), 2, Palette.rgb(0x111114), line: 1.4)
+        rrect(cg, CGRect(x: body.maxX - 11, y: body.maxY - 2, width: 7, height: 6), 2, Palette.rgb(0x111114), line: 1.4)
+        rrect(cg, body, 5, Palette.rgb(0x1E1F24), line: 2.2)
+        for (prov, r) in cabs {
             let hover = hoverPoint.map { r.contains($0) } ?? false
-            let body = prov == .claude ? Palette.rgb(0xC96A4A) : Palette.rgb(0x3A3D44)
-            let dark = body.blended(withFraction: 0.3, of: .black) ?? body
-            cg.setFillColor(NSColor.black.withAlphaComponent(0.15).cgColor)
-            cg.fillEllipse(in: CGRect(x: r.minX - 4, y: r.maxY - 4, width: r.width + 8, height: 8))
-            rrect(cg, r, 4, body, line: 2.2)
-            // Tres cajones; el de arriba se abre un poco al pasar el ratón
-            for k in 0..<3 {
-                let dh = (r.height - 12) / 3
-                var d = CGRect(x: r.minX + 5, y: r.minY + 4 + CGFloat(k) * (dh + 2), width: r.width - 10, height: dh)
-                if k == 0 && hover { d = d.offsetBy(dx: 0, dy: 3).insetBy(dx: -3, dy: 0) }
-                rrect(cg, d, 3, k == 0 && hover ? (body.blended(withFraction: 0.15, of: .white) ?? body) : body, line: 1.8)
-                rrect(cg, CGRect(x: d.midX - 9, y: d.minY + 6, width: 18, height: 5), 2, Palette.rgb(0xD9D9D9), line: 1.2)
-                if k == 0 {
-                    rrect(cg, CGRect(x: d.minX + 4, y: d.maxY - 12, width: d.width - 8, height: 9), 2, Palette.rgb(0xF2E8CF), line: 1)
-                    text(prov == .claude ? "CLAUDE" : "CHATGPT", Fonts.rounded(6.5, .black), dark, center: CGPoint(x: d.midX, y: d.maxY - 7.5))
+            var d = r.insetBy(dx: 1, dy: 2)
+            if hover { d = d.offsetBy(dx: 0, dy: 3).insetBy(dx: -3, dy: 0) }
+            rrect(cg, d, 3, hover ? Palette.rgb(0x34363E) : Palette.rgb(0x2A2C33), line: 1.8)
+            // Placa con el nombre y un punto de color de cada app
+            let plate = CGRect(x: d.minX + 6, y: d.minY + 5, width: d.width - 12, height: 13)
+            rrect(cg, plate, 2.5, Palette.rgb(0xF2E8CF), line: 1)
+            let dot = prov == .claude ? Palette.rgb(0xD97757) : Palette.rgb(0x10A37F)
+            ellipse(cg, CGRect(x: plate.minX + 3, y: plate.midY - 3.5, width: 7, height: 7), dot, line: 0.8)
+            text(prov == .claude ? "Claude" : "ChatGPT", Fonts.rounded(8, .black), Palette.rgb(0x2A2C33), center: CGPoint(x: plate.midX + 4, y: plate.midY))
+            // Tirador
+            rrect(cg, CGRect(x: d.midX - 11, y: d.maxY - 13, width: 22, height: 6), 3, Palette.rgb(0xC9A227), line: 1.2)
+            if hover {
+                for f in 0..<4 {
+                    rrect(cg, CGRect(x: d.minX + 8 + CGFloat(f) * 14, y: d.minY - 6 - CGFloat(f % 2) * 2, width: 11, height: 8), 1, Palette.rgb(0xFFF7E2), line: 1)
                 }
-                if k == 0 && hover {
-                    // fichas asomando
-                    for f in 0..<4 {
-                        rrect(cg, CGRect(x: d.minX + 5 + CGFloat(f) * 9, y: d.minY - 6 - CGFloat(f % 2) * 2, width: 8, height: 8), 1, Palette.rgb(0xFFF7E2), line: 1)
-                    }
-                }
+                pill("conversaciones de \(prov.name)", center: CGPoint(x: r.midX, y: body.maxY + 14), maxW: 190)
             }
-            if hover { pill("conversaciones", center: CGPoint(x: r.midX, y: r.minY - 12), maxW: 120) }
         }
     }
 
