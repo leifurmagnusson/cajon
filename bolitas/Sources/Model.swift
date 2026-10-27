@@ -141,7 +141,7 @@ final class Store {
             } else if o.working {
                 c.seen = false
                 if c.mood != .working { c.mood = .working; c.since = now }
-                c.evidence = o.current ? .current : .sidebar
+                c.evidence = o.fromSidebar ? .sidebar : (o.current ? .current : .sidebar)
                 c.lastConfirmed = now; c.lastActive = now
             } else {
                 switch c.mood {

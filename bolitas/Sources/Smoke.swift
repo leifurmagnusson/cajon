@@ -17,6 +17,7 @@ private struct Particle {
     var settled: Bool
     var seed: CGFloat
     var inRoom: Bool = false
+    var pushed: Bool = false     // lo has empujado con el ratón: si lo llevas al borde, se va
 }
 
 final class SmokeOverlay {
@@ -48,6 +49,20 @@ final class SmokeOverlay {
         }
         return ctx.makeImage()!
     }
+    /// Hilo de humo fino (como de incienso): una mancha alargada y muy suave.
+    private static let wisp: CGImage = {
+        let w = 32, h = 96
+        let cs = CGColorSpaceCreateDeviceRGB()
+        let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: cs,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        for k in 0..<6 {
+            let cy = 14 + CGFloat(k) * 13, cx = 16 + CGFloat(k % 2 == 0 ? -3 : 3)
+            let g = CGGradient(colorsSpace: cs, colors: [CGColor(red: 0.8, green: 0.8, blue: 0.82, alpha: 0.32),
+                                                         CGColor(red: 0.8, green: 0.8, blue: 0.82, alpha: 0)] as CFArray, locations: [0, 1])!
+            ctx.drawRadialGradient(g, startCenter: CGPoint(x: cx, y: cy), startRadius: 0, endCenter: CGPoint(x: cx, y: cy), endRadius: 12, options: [])
+        }
+        return ctx.makeImage()!
+    }()
     private static let fresh = puff(0.42, 0.55)    // la bocanada al salir: gris
     private static let old = puff(0.16, 0.6)       // la que se queda arriba: casi negra
 
@@ -91,9 +106,9 @@ final class SmokeOverlay {
         let room = roomScreen.map { NSRect(x: $0.minX - o.x, y: $0.minY - o.y, width: $0.width, height: $0.height) }
         if room != nil {
             if sources.isEmpty { roomLevel = max(0, roomLevel - dt / 18) }
-            else { roomLevel = min(1, roomLevel + dt / 20 * CGFloat(min(sources.count, 3))) }
+            else { roomLevel = min(1, roomLevel + dt / 10 * CGFloat(min(sources.count, 3))) }
         } else { roomLevel = 0 }
-        let chimneyOn = room != nil && chimneyScreen != nil && roomLevel >= 0.97 && !sources.isEmpty
+        let chimneyOn = room != nil && chimneyScreen != nil && roomLevel >= 0.3 && !sources.isEmpty
         let feedsScreen = room == nil ? !sources.isEmpty : chimneyOn
         // El techo de humo de la pantalla baja a medida que se acumula (hasta media pantalla).
         if !feedsScreen { level = max(0, level - dt / 60) } else { level = min(1, level + dt / 150 * CGFloat(min(max(sources.count, 1), 3))) }
@@ -107,8 +122,8 @@ final class SmokeOverlay {
             while chimneyAcc >= 1 {
                 chimneyAcc -= 1
                 let l = CALayer()
-                l.contents = SmokeOverlay.old
-                let size = CGFloat.random(in: 24...36)
+                l.contents = SmokeOverlay.wisp
+                let size = CGFloat.random(in: 9...14)
                 l.bounds = CGRect(x: 0, y: 0, width: size, height: size)
                 root.addSublayer(l)
                 parts.append(Particle(layer: l, x: c.x - o.x + CGFloat.random(in: -4...4), y: c.y - o.y,
@@ -125,12 +140,12 @@ final class SmokeOverlay {
             while spawnAcc[i, default: 0] >= 1 {
                 spawnAcc[i, default: 0] -= 1
                 let l = CALayer()
-                l.contents = SmokeOverlay.fresh
-                let size = CGFloat.random(in: 26...40)
+                l.contents = SmokeOverlay.wisp
+                let size = CGFloat.random(in: 6...10)
                 l.bounds = CGRect(x: 0, y: 0, width: size, height: size)
                 root.addSublayer(l)
                 parts.append(Particle(layer: l, x: s.x - o.x + CGFloat.random(in: -3...3), y: s.y - o.y,
-                                      vx: CGFloat.random(in: -8...14), vy: CGFloat.random(in: 70...110),
+                                      vx: CGFloat.random(in: -3...3), vy: CGFloat.random(in: 38...52),
                                       size: size, age: 0, life: CGFloat.random(in: 70...130), settled: false,
                                       seed: CGFloat.random(in: 0...100), inRoom: room != nil))
             }
@@ -149,24 +164,27 @@ final class SmokeOverlay {
             var p = parts[k]
             p.age += dt
             if p.inRoom, let r = room {
-                // Dentro de la sala: sube hasta el techo de la sala y se va acumulando hacia abajo
-                let top = r.maxY - p.size * 0.4
-                let fill = top - roomLevel * r.height * 0.85
-                if p.y < fill { p.vy += (34 - p.vy) * 0.8 * dt }
-                else {
-                    if !p.settled { p.settled = true; p.layer.contents = SmokeOverlay.old }
-                    p.vy += (((fill + top) / 2 - p.y) * 0.8 - p.vy) * 1.4 * dt
+                // Sube como incienso (un hilo fino que ondula cada vez más) y se acumula en el techo de la sala.
+                let top = r.maxY - 4
+                let fill = top - (0.08 + roomLevel * 0.22) * r.height     // la bola de humo se queda arriba
+                if p.y < fill && !p.settled {
+                    let amp = 6 + min(p.age, 4) * 6
+                    p.vx = cos(p.age * 2.6 + p.seed) * amp * 0.9
+                    p.vy += (44 - p.vy) * 1.2 * dt
+                } else {
+                    if !p.settled { p.settled = true; p.layer.contents = SmokeOverlay.old; p.vx = CGFloat.random(in: -22...22) }
+                    p.vy += (((fill + top) / 2 - p.y) * 0.9 - p.vy) * 1.5 * dt
+                    p.vx += sin(t * 0.7 + p.seed) * 10 * dt
+                    p.vx *= 0.985
                 }
-                p.vx += sin(t * 0.9 + p.seed) * 14 * dt
-                p.vx *= 0.97; p.vy *= 0.97
                 p.x += p.vx * dt; p.y += p.vy * dt
-                p.x = min(max(p.x, r.minX + p.size * 0.3), r.maxX - p.size * 0.3)
+                p.x = min(max(p.x, r.minX + 6), r.maxX - 6)
                 p.y = min(max(p.y, r.minY), top)
-                let sz = p.size * (1 + min(p.age / 5, 1) * 1.6)
+                let sz = p.settled ? p.size * (2.4 + min(p.age / 8, 1) * 2.4) : p.size * (1 + min(p.age / 4, 1) * 0.6)
                 p.layer.position = CGPoint(x: p.x, y: p.y)
-                p.layer.bounds = CGRect(x: 0, y: 0, width: sz, height: sz)
+                p.layer.bounds = CGRect(x: 0, y: 0, width: sz, height: p.settled ? sz * 0.7 : sz * 2.6)
                 let fadeOut = sources.isEmpty ? max(0, 1 - idleTime / 18) : 1
-                p.layer.opacity = Float(min(1, p.age / 0.4) * fadeOut * 0.7)
+                p.layer.opacity = Float(min(1, p.age / 0.6) * fadeOut * (p.settled ? 0.42 : 0.55))
                 if p.age > p.life - 10 { p.age = p.life - 10 }   // no se muere de viejo dentro de la sala
                 parts[k] = p
                 continue
@@ -190,14 +208,22 @@ final class SmokeOverlay {
                     let f = (1 - d / R)
                     p.vx += mv.dx * f * 0.9 * dt * 6
                     p.vy += mv.dy * f * 0.9 * dt * 6
+                    if f * mspeed > 150 { p.pushed = true }
                 }
             }
             p.vx *= 0.985; p.vy *= 0.985
             p.x += p.vx * dt; p.y += p.vy * dt
             // Contra la pared derecha se acumula
-            if p.x > W - p.size * 0.3 { p.x = W - p.size * 0.3; p.vx = min(p.vx, 0) - 2 }
-            if p.x < -p.size { p.x = -p.size }
-            if p.y > H + p.size { p.y = H + p.size }
+            if p.pushed {
+                // Empujado fuera de la pantalla: se va y no vuelve (y el techo de humo baja un poco)
+                if p.x < -p.size || p.x > W + p.size || p.y < -p.size || p.y > H + p.size * 2 {
+                    p.age = p.life; level = max(0, level - 0.006)
+                }
+            } else {
+                if p.x > W - p.size * 0.3 { p.x = W - p.size * 0.3; p.vx = min(p.vx, 0) - 2 }
+                if p.x < -p.size { p.x = -p.size }
+                if p.y > H + p.size { p.y = H + p.size }
+            }
             // Crece al expandirse y se oscurece con el tiempo
             let grow = 1 + min(p.age / 6, 1) * (p.settled ? 3.2 : 1.6)
             let sz = p.size * grow
@@ -239,5 +265,71 @@ final class SmokeOverlay {
         window = nil; root = nil; ceiling = nil
         level = 0; idleTime = 0; spawnAcc.removeAll(); lastMouse = nil
         roomLevel = 0; roomVeil = nil; chimneyAcc = 0
+    }
+}
+
+/// Confeti que sale por la chimenea cuando alguna conversación ha terminado y aún no la has mirado.
+final class ConfettiOverlay {
+    private var window: NSWindow?
+    private var emitter: CAEmitterLayer?
+    private var on = false
+
+    private static func piece(_ color: NSColor, round: Bool) -> CGImage {
+        let s = 12
+        let ctx = CGContext(data: nil, width: s, height: s, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.setFillColor(color.cgColor)
+        if round { ctx.fillEllipse(in: CGRect(x: 2, y: 2, width: 8, height: 8)) } else { ctx.fill(CGRect(x: 1, y: 4, width: 10, height: 5)) }
+        return ctx.makeImage()!
+    }
+
+    private func ensure(_ screen: NSScreen) {
+        if let w = window, w.frame == screen.frame { return }
+        window?.orderOut(nil)
+        let w = NSWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        w.isOpaque = false; w.backgroundColor = .clear; w.hasShadow = false
+        w.ignoresMouseEvents = true
+        w.level = .floating
+        w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        let v = NSView(frame: NSRect(origin: .zero, size: screen.frame.size)); v.wantsLayer = true
+        let e = CAEmitterLayer()
+        e.frame = v.bounds; e.emitterShape = .point; e.birthRate = 0
+        let colors: [UInt32] = [0xE5484D, 0xFFD60A, 0x30A46C, 0x3E8ED0, 0xD6409F, 0xF76808, 0x8E4EC6]
+        e.emitterCells = colors.enumerated().map { (i, c) in
+            let cell = CAEmitterCell()
+            cell.contents = ConfettiOverlay.piece(Palette.rgb(c), round: i % 3 == 0)
+            cell.birthRate = 3
+            cell.lifetime = 5; cell.lifetimeRange = 1.5
+            cell.velocity = 150; cell.velocityRange = 60
+            cell.emissionLongitude = .pi / 2; cell.emissionRange = 0.55
+            cell.yAcceleration = -110
+            cell.spin = 3; cell.spinRange = 6
+            cell.scale = 0.9; cell.scaleRange = 0.4
+            cell.alphaSpeed = -0.18
+            return cell
+        }
+        v.layer?.addSublayer(e)
+        w.contentView = v
+        w.setFrame(screen.frame, display: false)
+        window = w; emitter = e
+    }
+
+    func step(chimney: NSPoint?, active: Bool, screen: NSScreen?) {
+        guard let screen = screen, let c = chimney, active else {
+            if on { emitter?.birthRate = 0; on = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in if self?.on == false { self?.window?.orderOut(nil) } }
+            }
+            return
+        }
+        ensure(screen)
+        guard let w = window, let e = emitter else { return }
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        e.emitterPosition = CGPoint(x: c.x - w.frame.minX, y: c.y - w.frame.minY)
+        // A ráfagas, como una fiesta: un rato sí, un rato no
+        let burst = sin(CGFloat(Date().timeIntervalSinceReferenceDate) * 1.6) > 0.2
+        e.birthRate = burst ? 1 : 0
+        CATransaction.commit()
+        if !w.isVisible { w.orderFrontRegardless() }
+        on = true
     }
 }

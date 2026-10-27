@@ -318,7 +318,9 @@ final class GorilasView: StageView, NSDraggingSource {
         case .done:
             // Ya ha terminado: te saluda y juega con una bola de billar para que lo veas
             ellipse(cg, CGRect(x: x - 42, y: T - 14, width: 17, height: 13), hand, line: 1.8)
-            drawHello(cg, handX: x + 38, handY: y - 14, ballX: x - 30, floorY: T, ph: ph, hand: hand)
+            // Ha terminado: lo celebra con un matasuegras y confeti
+            drawPartyHorn(cg, mouth: CGPoint(x: x + 10, y: y + 20), ph: ph)
+            ellipse(cg, CGRect(x: x + 28, y: T - 15, width: 15, height: 13), hand, line: 1.6)
         case .needsYou:
             // Brazos cruzados sobre la mesa, esperando
             rrect(cg, CGRect(x: x - 38, y: T - 13, width: 76, height: 12), 6, L.vest, line: 1.8)
@@ -547,14 +549,29 @@ final class GorilasView: StageView, NSDraggingSource {
     private var frogX: CGFloat { W - 62 }
     private var items: [ShelfItem] { ShelfStore.shared.items }
     /// Las cajas se colocan al lado de la rana y van hacia la izquierda (hacia la chimenea).
+    /// Las cajas se apilan al lado de la rana: de tres en tres, un poco torcidas, como mal apiladas.
     private func boxRect(_ i: Int) -> CGRect {
-        CGRect(x: frogX - 86 - CGFloat(i) * 40, y: roofTop - 30, width: 34, height: 30)
+        let cols = boxCols
+        let col = i % cols, lvl = i / cols
+        var d = Dice("caja\(i)")
+        let jx = CGFloat(Int(d.next() % 9) - 4) + (lvl % 2 == 1 ? 9 : 0)
+        if lvl >= 3 {
+            // Las que ya no caben se han caído: quedan tumbadas a los pies del montón
+            let fallen = i - cols * 3
+            return CGRect(x: frogX - 86 - CGFloat(cols) * 38 - 8 - CGFloat(fallen) * 22, y: roofTop - 24, width: 34, height: 30)
+        }
+        return CGRect(x: frogX - 86 - CGFloat(col) * 38 + jx, y: roofTop - 30 - CGFloat(lvl) * 29, width: 34, height: 30)
+    }
+    private func boxTilt(_ i: Int) -> CGFloat {
+        var d = Dice("inclina\(i)")
+        let base = CGFloat(Int(d.next() % 17) - 8) / 100
+        return i >= boxCols * 3 ? base + (i % 2 == 0 ? 1.2 : -0.9) : base
     }
     private func boxIndex(at p: NSPoint) -> Int? {
         let n = min(items.count, maxBoxes)
         return (0..<n).first { boxRect($0).insetBy(dx: -2, dy: -2).contains(p) }
     }
-    private var maxBoxes: Int { max(1, Int((frogX - 86 - (roomLeft + 70)) / 40) + 1) }
+    private var maxBoxes: Int { boxCols * 3 + 2 }
 
     private func toScreen(_ x: CGFloat, _ y: CGFloat) -> NSPoint? {
         guard let w = window else { return nil }
@@ -603,8 +620,14 @@ final class GorilasView: StageView, NSDraggingSource {
         rrect(cg, CGRect(x: ch.minX - 4, y: ch.minY - 4, width: ch.width + 8, height: 7), 2, Palette.rgb(0x6B3A24), line: 1.8)
         // Cajas que se ha tragado la rana
         let n = min(items.count, maxBoxes)
-        for i in 0..<n { drawBox(cg, items[i], boxRect(i), hover: hoverPoint.map { boxRect(i).contains($0) } ?? false) }
-        if items.count > n { pill("+\(items.count - n)", center: CGPoint(x: boxRect(n).minX + 16, y: boxRect(n).midY), maxW: 50) }
+        for i in 0..<n {
+            let r = boxRect(i)
+            cg.saveGState()
+            cg.translateBy(x: r.midX, y: r.midY); cg.rotate(by: boxTilt(i)); cg.translateBy(x: -r.midX, y: -r.midY)
+            drawBox(cg, items[i], r, hover: hoverPoint.map { r.contains($0) } ?? false)
+            cg.restoreGState()
+        }
+        if items.count > n { pill("+\(items.count - n)", center: CGPoint(x: boxRect(n - 1).minX - 14, y: roofTop - 12), maxW: 50) }
         drawClothesline(cg)
         drawFrogOnRoof(cg)
     }
@@ -612,8 +635,10 @@ final class GorilasView: StageView, NSDraggingSource {
     // MARK: Tendedero del portapapeles
 
     private var lineY: CGFloat { roofTop - 74 }
-    private var lineX0: CGFloat { roomLeft + 52 }
-    private var lineX1: CGFloat { frogX - 44 }
+    private var lineX0: CGFloat { roomLeft + 84 }                    // a la derecha de la chimenea
+    private var lineX1: CGFloat { max(lineX0 + 4 * 36 + 16, min(lineX0 + 8 * 36 + 16, frogX - 86 - 3 * 38 - 60)) }   // solo un trozo del tejado
+    /// Columnas del montón de cajas según el sitio que quede entre el tendedero y la rana.
+    private var boxCols: Int { max(1, min(3, Int((frogX - 86 - (lineX1 + 24)) / 38) + 1)) }
     private var clips: [ClipItem] { ClipStore.shared.ordered }
     private var maxNotes: Int { max(1, Int((lineX1 - lineX0 - 10) / 36)) }
     private func noteRect(_ i: Int) -> CGRect {

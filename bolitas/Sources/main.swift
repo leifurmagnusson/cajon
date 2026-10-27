@@ -8,6 +8,8 @@ import ServiceManagement
 final class BubblePanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+    /// Se puede esconder por debajo del borde de la pantalla (como el Dock).
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -18,6 +20,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var lastStatusKey = ""
     private let start = Date()
     private let smoke = SmokeOverlay()
+    private let confetti = ConfettiOverlay()
+    // Casa que se esconde como el Dock (solo en el club)
+    private var houseHidden = false
+    private var outsideSince: Date?
+    private var dockAnimating = false
+    private var autoHide: Bool {
+        get { UserDefaults.standard.object(forKey: "house.autoHide") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "house.autoHide") }
+    }
+    private var docks: Bool { Prefs.theme == .billar }
+
+    /// Dónde va la casa: pegada abajo a la derecha; escondida, solo asoma el tejado.
+    private func dockFrame(hidden: Bool) -> NSRect {
+        let s = panel.screen ?? NSScreen.main ?? NSScreen.screens[0]
+        let size = scaled(type(of: view).size(for: view.chats.count))
+        let roof = GorilasView.roofH * GorilasView.drawScale * Prefs.sizeFactor(for: Prefs.theme) + 4
+        let y = hidden ? s.frame.minY - (size.height - roof) : s.frame.minY
+        return NSRect(x: s.frame.maxX - size.width, y: y, width: size.width, height: size.height)
+    }
+    private func setHouse(hidden: Bool, animated: Bool = true) {
+        houseHidden = hidden
+        let f = dockFrame(hidden: hidden)
+        guard animated else { panel.setFrame(f, display: true); return }
+        dockAnimating = true
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = hidden ? 0.45 : 0.3
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            panel.animator().setFrame(f, display: true)
+        }, completionHandler: { [weak self] in self?.dockAnimating = false })
+    }
+    /// Cada fotograma: si el ratón está encima, la casa sube; si lleva un rato fuera, baja.
+    private func dockTick() {
+        guard docks, !dockAnimating else { return }
+        let m = NSEvent.mouseLocation
+        let s = panel.screen ?? NSScreen.main ?? NSScreen.screens[0]
+        let visible = panel.frame.intersection(s.frame)
+        let over = visible.insetBy(dx: -2, dy: -2).contains(m)
+        let busy = (NSEvent.pressedMouseButtons & 1) == 1 && over
+        if over || busy { outsideSince = nil; if houseHidden { setHouse(hidden: false) }; return }
+        guard autoHide else { if houseHidden { setHouse(hidden: false) }; return }
+        if outsideSince == nil { outsideSince = Date() }
+        if !houseHidden, let o = outsideSince, Date().timeIntervalSince(o) > 6 { setHouse(hidden: true) }
+    }
     private var lastFrameT: CGFloat = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -93,7 +138,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let v = cls.init(frame: NSRect(origin: .zero, size: size))
         v.onClick = { [weak self] c in self?.openChat(c) }
         v.onPlaceholderClick = { [weak self] in self?.placeholderClicked() }
-        v.onMoved = { o in Prefs.setOrigin(o, for: Prefs.theme) }
+        v.onMoved = { [weak self] o in
+            guard let self = self else { return }
+            if self.docks { self.setHouse(hidden: false) } else { Prefs.setOrigin(o, for: Prefs.theme) }   // la casa vuelve a su esquina
+        }
         v.onDrop = { [weak self] s in self?.ingest(s) ?? false }
         v.menuFor = { [weak self] c in self?.chatMenu(c) }
         v.onMicrophone = { [weak self, weak v] at in
@@ -149,6 +197,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         view.t = t
         view.needsDisplay = true
         Frog.shared.step(t: t, dt: dt, mouth: (view as? GorilasView)?.frogMouthScreen())
+        dockTick()
         if Int(t * 30) % 10 == 0 { ClipStore.shared.poll() }
         do {
             var src: [NSPoint] = [], names: [String] = []
@@ -163,6 +212,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let g = view as? GorilasView
             smoke.step(t: t, dt: dt, sources: src, names: names, screen: panel.screen,
                        room: g?.roomScreenRect(), chimney: g?.chimneyScreen())
+            confetti.step(chimney: g?.chimneyScreen(), active: view.chats.contains { $0.mood == .done }, screen: panel.screen)
         }
     }
 
@@ -201,6 +251,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         let onScreen = NSScreen.screens.contains { $0.frame.intersects(frame) }
         if !onScreen { frame.origin = defaultOrigin(for: size) }
+        if docks { frame = dockFrame(hidden: houseHidden) }
         panel.setFrame(frame, display: true)
         view.frame = NSRect(origin: .zero, size: size)
         view.setBoundsSize(base)   // dibuja a su tamaño de siempre y macOS lo escala
@@ -394,7 +445,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         st.submenu = sm; menu.addItem(st)
         let tm = NSMenuItem(title: "Tamaño", action: nil, keyEquivalent: "")
         let tsm = NSMenu()
-        for (name, f) in [("Pequeño", 0.75), ("Mediano", 1.0), ("Grande", 1.35)] as [(String, CGFloat)] {
+        for (name, f) in [("Muy pequeño", 0.75), ("Pequeño", 0.9), ("Mediano", 1.05), ("Grande", 1.2), ("Muy grande", 1.35)] as [(String, CGFloat)] {
             let it = tsm.addItem(withTitle: name, action: #selector(chooseSize(_:)), keyEquivalent: "")
             it.target = self; it.representedObject = f
             it.state = abs(Prefs.sizeFactor(for: Prefs.theme) - f) < 0.01 ? .on : .off
@@ -439,6 +490,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         cm.submenu = csm; menu.addItem(cm)
         if Prefs.theme == .billar {
+            add("Esconder la casa cuando no la uso (se ve el tejado)", #selector(toggleAutoHide), on: autoHide)
             add("Rana del tejado: atrapa lo que arrastras", #selector(toggleFrog), on: Frog.shared.enabled)
             if !ShelfStore.shared.items.isEmpty { add("Vaciar el tejado (\(ShelfStore.shared.items.count))", #selector(clearRoof)) }
         }
@@ -462,6 +514,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let id = s.representedObject as? String, let it = ClipStore.shared.items.first(where: { $0.id == id }) { ClipStore.shared.copy(it) }
     }
     @objc private func clipClear() { ClipStore.shared.clearUnpinned() }
+    @objc private func toggleAutoHide() { autoHide.toggle(); if !autoHide { setHouse(hidden: false) } }
     @objc private func toggleFrog() { Frog.shared.enabled.toggle() }
     @objc private func clearRoof() { ShelfStore.shared.removeAll() }
     @objc private func toggleSound() { Prefs.sound.toggle() }

@@ -138,6 +138,37 @@ class StageView: NSView {
             pill("🎙 hablar", center: CGPoint(x: r.midX, y: r.maxY + 14), maxW: 90)
         }
     }
+    /// Matasuegras de fiesta: se estira y se enrolla soplando, con confeti alrededor.
+    func drawPartyHorn(_ cg: CGContext, mouth: CGPoint, ph: CGFloat) {
+        let ext = max(0, sin(t * 3.2 + ph))          // 0 enrollado · 1 estirado
+        let len = 8 + ext * 38
+        cg.saveGState()
+        cg.translateBy(x: mouth.x, y: mouth.y); cg.rotate(by: -0.25)
+        // boquilla
+        rrect(cg, CGRect(x: -2, y: -3, width: 9, height: 6), 2, Palette.rgb(0xFFD60A), line: 1.2)
+        // papel: recto hasta len y la punta enrollada (más enrollada cuanto menos estirado)
+        let curl = (1 - ext) * 9 + 3
+        let p = CGMutablePath()
+        p.move(to: CGPoint(x: 7, y: 0)); p.addLine(to: CGPoint(x: 7 + len, y: 0))
+        p.addArc(center: CGPoint(x: 7 + len, y: curl), radius: curl, startAngle: -.pi / 2, endAngle: .pi * (0.5 + 1.2 * (1 - ext)), clockwise: false)
+        cg.addPath(p); cg.setStrokeColor(Palette.outline.cgColor); cg.setLineWidth(6); cg.strokePath()
+        cg.addPath(p); cg.setStrokeColor(Palette.rgb(0xE5484D).cgColor); cg.setLineWidth(4); cg.strokePath()
+        cg.addPath(p); cg.setStrokeColor(Palette.rgb(0xFFFFFF, 0.8).cgColor); cg.setLineWidth(1); cg.setLineDash(phase: 0, lengths: [3, 4]); cg.strokePath()
+        cg.setLineDash(phase: 0, lengths: [])
+        cg.restoreGState()
+        // confeti cayendo alrededor
+        let cols: [UInt32] = [0xE5484D, 0xFFD60A, 0x30A46C, 0x3E8ED0, 0xD6409F]
+        for k in 0..<7 {
+            let q = (t * 0.7 + CGFloat(k) / 7 + ph).truncatingRemainder(dividingBy: 1)
+            let x = mouth.x - 30 + CGFloat((k * 23) % 70) + sin(t * 3 + CGFloat(k)) * 4
+            let y = mouth.y - 50 + q * 60
+            cg.saveGState(); cg.translateBy(x: x, y: y); cg.rotate(by: t * 4 + CGFloat(k))
+            cg.setFillColor(Palette.rgb(cols[k % cols.count], 1 - q * 0.6).cgColor)
+            cg.fill(CGRect(x: -2.5, y: -1.2, width: 5, height: 2.4))
+            cg.restoreGState()
+        }
+    }
+
     /// «¡Hola!»: saluda con la mano y juega con una pelota para que veas que ya ha terminado.
     func drawHello(_ cg: CGContext, handX: CGFloat, handY: CGFloat, ballX: CGFloat, floorY: CGFloat, ph: CGFloat, hand: NSColor) {
         let wave = sin(t * 9 + ph) * 6
