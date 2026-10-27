@@ -546,14 +546,28 @@ final class GorilasView: StageView, NSDraggingSource {
     private var roofTop: CGFloat { -GorilasView.topPad - GorilasView.roofH + 96 }
     private var frogX: CGFloat { W - 62 }
     private var items: [ShelfItem] { ShelfStore.shared.items }
+    /// Las cajas se colocan al lado de la rana y van hacia la izquierda (hacia la chimenea).
     private func boxRect(_ i: Int) -> CGRect {
-        CGRect(x: roomLeft + 74 + CGFloat(i) * 40, y: roofTop - 30, width: 34, height: 30)
+        CGRect(x: frogX - 86 - CGFloat(i) * 40, y: roofTop - 30, width: 34, height: 30)
     }
     private func boxIndex(at p: NSPoint) -> Int? {
         let n = min(items.count, maxBoxes)
         return (0..<n).first { boxRect($0).insetBy(dx: -2, dy: -2).contains(p) }
     }
-    private var maxBoxes: Int { max(1, Int((frogX - 50 - roomLeft - 74) / 40)) }
+    private var maxBoxes: Int { max(1, Int((frogX - 86 - (roomLeft + 70)) / 40) + 1) }
+
+    private func toScreen(_ x: CGFloat, _ y: CGFloat) -> NSPoint? {
+        guard let w = window else { return nil }
+        let k = GorilasView.drawScale
+        return w.convertPoint(toScreen: convert(NSPoint(x: x * k, y: (y + drawOffsetY) * k), to: nil))
+    }
+    /// La sala de los gorilas en pantalla: el humo la llena primero.
+    func roomScreenRect() -> NSRect? {
+        guard let a = toScreen(roomLeft, -GorilasView.topPad), let b = toScreen(W, GorilasView.H) else { return nil }
+        return NSRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x - a.x), height: abs(b.y - a.y))
+    }
+    /// Boca de la chimenea en pantalla: por ahí sale el humo cuando la sala ya está llena.
+    func chimneyScreen() -> NSPoint? { toScreen(roomLeft + 47, roofTop - 36) }
 
     /// Boca de la rana en coordenadas de pantalla (para la lengua).
     func frogMouthScreen() -> NSPoint? {

@@ -160,7 +160,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     names.append(view.chats[i].shortTitle)
                 }
             }
-            smoke.step(t: t, dt: dt, sources: src, names: names, screen: panel.screen)
+            let g = view as? GorilasView
+            smoke.step(t: t, dt: dt, sources: src, names: names, screen: panel.screen,
+                       room: g?.roomScreenRect(), chimney: g?.chimneyScreen())
         }
     }
 
