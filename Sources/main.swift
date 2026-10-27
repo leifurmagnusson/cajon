@@ -248,7 +248,7 @@ final class HandView: NSView, NSDraggingSource {
     private(set) var exitT: CGFloat?
     private var exitOffset = CGPoint.zero
     private var exitPhi: CGFloat = 0
-    var goodbyeFinished: Bool { (exitT ?? 0) > 3.5 }
+    var goodbyeFinished: Bool { (exitT ?? 0) > 2.3 }
 
     func startGoodbye() {
         guard exitT == nil else { return }
@@ -272,19 +272,19 @@ final class HandView: NSView, NSDraggingSource {
         guard var t = exitT else { return }
         t += dt
         exitT = t
-        if t < 0.9 {
-            // Se queda un momento, como pensándoselo
+        if t < 0.25 {
+            // Un instante, como pensándoselo
             exitOffset = .zero
-            exitPhi = 0.025 * sin(t * 6)
-        } else if t < 2.1 {
-            // ¡Adiós! (tres saludos con la muñeca, un poco levantada)
-            let w = t - 0.9
-            let env = sin(min(1, w / 1.2) * .pi)
+            exitPhi = 0.025 * sin(t * 12)
+        } else if t < 1.1 {
+            // ¡Adiós! (tres saludos rápidos con la muñeca, un poco levantada)
+            let w = t - 0.25
+            let env = sin(min(1, w / 0.85) * .pi)
             exitOffset = CGPoint(x: 0, y: -10 * env)
-            exitPhi = 0.34 * sin(w * 2 * .pi * 2.5) * env
+            exitPhi = 0.34 * sin(w * 2 * .pi * 3.5) * env
         } else {
             // Baja la escalera: 4 escalones, cada uno con su saltito
-            let u = (t - 2.1) / 0.32
+            let u = (t - 1.1) / 0.24
             let k = floor(u), f = u - k
             let ease = f * f * (3 - 2 * f)
             exitOffset = CGPoint(x: 36 * (k + ease), y: 30 * (k + ease) - 16 * sin(.pi * f))
@@ -762,9 +762,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func place() {
+        // La mano sale a un tercio de la altura (por encima de los monos de Bolitas, que viven abajo a la derecha).
+        let sf = mouseScreen().frame
         let vf = mouseScreen().visibleFrame
-        let h = min(vf.height * 0.92, 900)
-        panel.setFrame(NSRect(x: vf.maxX - width, y: vf.minY, width: width, height: h), display: true)
+        let bottom = sf.minY + sf.height / 3 - 74
+        let h = min(vf.maxY - bottom, 900)
+        panel.setFrame(NSRect(x: sf.maxX - width, y: bottom, width: width, height: h), display: true)
         hand.needsDisplay = true
     }
 

@@ -21,6 +21,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var lastFrameT: CGFloat = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Una vez: los monos bajan al borde inferior de la pantalla (antes se quedaban encima del Dock).
+        if !UserDefaults.standard.bool(forKey: "monosAbajoV1") {
+            UserDefaults.standard.removeObject(forKey: "origin." + Theme.monos.rawValue)
+            UserDefaults.standard.set(true, forKey: "monosAbajoV1")
+        }
         panel = BubblePanel(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100),
                             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isOpaque = false
@@ -144,7 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let v = s.visibleFrame
         switch Prefs.theme {
         case .bolitas: return NSPoint(x: v.midX - size.width / 2, y: v.maxY - size.height - 4)
-        case .monos: return NSPoint(x: v.maxX - size.width - 6, y: v.minY + 2)
+        case .monos: return NSPoint(x: s.frame.maxX - size.width - 4, y: s.frame.minY)   // abajo del todo, a la altura del Dock
         case .enanitos: return NSPoint(x: v.minX + 6, y: v.minY + 2)
         }
     }
