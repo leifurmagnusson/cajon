@@ -1,0 +1,27 @@
+name: Compilar Bolitas
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'bolitas/**'
+      - '.github/workflows/bolitas.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compilar
+        run: |
+          set -o pipefail
+          chmod +x bolitas/build.sh
+          ./bolitas/build.sh 2>&1 | tee build.log
+      - name: Mostrar errores
+        if: failure()
+        run: grep -E "error:" build.log | head -30 | sed 's/^/::error::/' || true
+      - name: Publicar versión
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "bolitas-v1.${GITHUB_RUN_NUMBER}" bolitas/dist/Bolitas.zip bolitas/dist/Bolitas.tar.gz --title "Bolitas 1.${GITHUB_RUN_NUMBER}" --notes "Build automática" --latest=false

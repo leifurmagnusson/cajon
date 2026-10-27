@@ -2,6 +2,9 @@ name: Compilar Hold It
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'bolitas/**'
+      - '.github/workflows/bolitas.yml'
   workflow_dispatch:
 permissions:
   contents: write
