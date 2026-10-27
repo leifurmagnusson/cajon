@@ -1,0 +1,32 @@
+name: Compilar tienda Magnusson
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tienda/**'
+      - '.github/workflows/tienda.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compilar
+        run: |
+          set -o pipefail
+          ./tienda/build.sh 2>&1 | tee build.log
+      - name: Mostrar errores
+        if: failure()
+        run: grep -E "error:" build.log | head -30 | sed 's/^/::error::/' || true
+      - name: Publicar versión
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "tienda-v1.${GITHUB_RUN_NUMBER}" tienda/dist/Magnusson.zip --title "Magnusson (tienda) 1.${GITHUB_RUN_NUMBER}" --notes "Build automática" --latest=false
+      - name: Enlace fijo de descarga (…/releases/download/tienda/Magnusson.zip)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view tienda >/dev/null 2>&1 || gh release create tienda --title "Magnusson — descarga para la familia" --notes "Descarga fija de la tienda de la familia. Se actualiza sola con cada versión." --latest=false
+          gh release upload tienda tienda/dist/Magnusson.zip --clobber
