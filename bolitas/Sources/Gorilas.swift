@@ -39,12 +39,13 @@ final class GorilasView: StageView {
     var usageLines: [String] = []
     var onDoorClick: (() -> Void)?
 
+    static let sideW: CGFloat = 64          // ancho de las paredes laterales en perspectiva
     static let topPad: CGFloat = 46          // fondo de la sala (pasillo por detrás de los gorilas)
     static let backLine: CGFloat = 152       // donde la pared del fondo toca el suelo
     override var drawOffsetY: CGFloat { GorilasView.topPad }
     override class func size(for count: Int) -> NSSize {
         let s = drawScale
-        return NSSize(width: (40 + 250 + CGFloat(max(1, count)) * cellW + 110) * s, height: (H + topPad) * s)
+        return NSSize(width: (40 + 290 + CGFloat(max(1, count)) * cellW + 170) * s, height: (H + topPad) * s)
     }
     private func look(_ c: Chat) -> GorillaLook {
         if let l = looks[c.key] { return l }
@@ -53,7 +54,7 @@ final class GorilasView: StageView {
     private var W: CGFloat { bounds.width / GorilasView.drawScale }
     /// La puerta, al fondo de la sala (más pequeña porque está lejos), cerrada salvo cuando alguien entra o sale.
     private var doorRect: CGRect {
-        CGRect(x: W - 84, y: GorilasView.backLine - 130, width: 64, height: 130)
+        CGRect(x: W - GorilasView.sideW - 84, y: GorilasView.backLine - 130, width: 64, height: 130)
     }
     private func slotX(_ i: Int) -> CGFloat { slotX(i, count: chats.count) }
     private func slotX(_ i: Int, count: Int) -> CGFloat {
@@ -67,14 +68,14 @@ final class GorilasView: StageView {
     }
 
     override func cabinets() -> [(Provider, CGRect)] {
-        let x0 = tableRect.minX - 200
+        let x0 = tableRect.minX - 232
         let bottom = GorilasView.tableTop + 40
         return [(.claude, CGRect(x: x0, y: bottom - 84, width: 54, height: 84)),
                 (.chatgpt, CGRect(x: x0 + 62, y: bottom - 84, width: 54, height: 84))]
     }
 
     override func microphone() -> CGRect? {
-        CGRect(x: tableRect.minX - 64, y: 34, width: 22, height: 44)
+        CGRect(x: tableRect.minX - 104, y: GorilasView.tableTop - 62, width: 80, height: 102)
     }
     static let sitAt: CGFloat = 2.3      // a partir de aquí ya está sentado
 
@@ -547,35 +548,56 @@ final class GorilasView: StageView {
 
     private func drawRoom(_ cg: CGContext) {
         let F = GorilasView.floor, H = GorilasView.H
-        let back: CGFloat = GorilasView.tableTop + 6      // donde la pared toca el suelo
-        let left = max(0, tableRect.minX - 214)
-        // Pared del fondo: papel pintado verde oscuro con rayas y zócalo de madera
+        let back: CGFloat = GorilasView.backLine          // donde la pared del fondo toca el suelo
+        let left = max(0, tableRect.minX - 254)
         let top = -GorilasView.topPad
-        let wall = CGRect(x: left, y: top, width: W - left, height: back - top)
-        cg.setFillColor(Palette.rgb(0x1E3A2C).cgColor); cg.fill(wall)
+        let sw = GorilasView.sideW
+        let bl = left + sw, br = W - sw                   // esquinas de la pared del fondo
+        let wallTop = top + 22
+        // Techo
+        let ceil = CGMutablePath()
+        ceil.move(to: CGPoint(x: left, y: top)); ceil.addLine(to: CGPoint(x: W, y: top))
+        ceil.addLine(to: CGPoint(x: br, y: wallTop)); ceil.addLine(to: CGPoint(x: bl, y: wallTop)); ceil.closeSubpath()
+        cg.addPath(ceil); cg.setFillColor(Palette.rgb(0x2A1F18).cgColor); cg.fillPath()
+        // Pared del fondo: papel pintado verde con rayas y zócalo
+        cg.setFillColor(Palette.rgb(0x1E3A2C).cgColor); cg.fill(CGRect(x: bl, y: wallTop, width: br - bl, height: back - wallTop))
         cg.setFillColor(Palette.rgb(0x24473A).cgColor)
-        var sx = left + 6
-        while sx < W { cg.fill(CGRect(x: sx, y: top, width: 7, height: back - top)); sx += 18 }
-        cg.setFillColor(Palette.rgb(0x5A3A22).cgColor); cg.fill(CGRect(x: left, y: back - 30, width: W - left, height: 30))
-        cg.setFillColor(Palette.rgb(0x7A4A28).cgColor); cg.fill(CGRect(x: left, y: back - 32, width: W - left, height: 4))
-        // Pared de la derecha en perspectiva (donde está la puerta)
-        let sideX = doorRect.maxX + 12
-        let side = CGMutablePath()
-        side.move(to: CGPoint(x: sideX, y: top)); side.addLine(to: CGPoint(x: W, y: top))
-        side.addLine(to: CGPoint(x: W, y: H)); side.addLine(to: CGPoint(x: sideX, y: back)); side.closeSubpath()
-        cg.addPath(side); cg.setFillColor(Palette.rgb(0x183024).cgColor); cg.fillPath()
+        var sx = bl + 6
+        while sx < br - 4 { cg.fill(CGRect(x: sx, y: wallTop, width: 7, height: back - wallTop)); sx += 18 }
+        cg.setFillColor(Palette.rgb(0x5A3A22).cgColor); cg.fill(CGRect(x: bl, y: back - 30, width: br - bl, height: 30))
+        cg.setFillColor(Palette.rgb(0x7A4A28).cgColor); cg.fill(CGRect(x: bl, y: back - 32, width: br - bl, height: 4))
+        // Paredes laterales en perspectiva (más oscuras), con su zócalo
+        let zf = 30 * (H - top) / (back - wallTop)
+        for (outer, inner) in [(left, bl), (W, br)] {
+            let wall = CGMutablePath()
+            wall.move(to: CGPoint(x: outer, y: top)); wall.addLine(to: CGPoint(x: inner, y: wallTop))
+            wall.addLine(to: CGPoint(x: inner, y: back)); wall.addLine(to: CGPoint(x: outer, y: H)); wall.closeSubpath()
+            cg.addPath(wall); cg.setFillColor(Palette.rgb(0x173024).cgColor); cg.fillPath()
+            cg.saveGState(); cg.addPath(wall); cg.clip()
+            cg.setStrokeColor(Palette.rgb(0x1E3A2C).cgColor); cg.setLineWidth(5)
+            for k in 1..<4 {
+                let f = CGFloat(k) / 4
+                let x = lerp(outer, inner, f)
+                cg.move(to: CGPoint(x: x, y: lerp(top, wallTop, f))); cg.addLine(to: CGPoint(x: x, y: lerp(H, back, f))); cg.strokePath()
+            }
+            let z = CGMutablePath()
+            z.move(to: CGPoint(x: inner, y: back - 30)); z.addLine(to: CGPoint(x: inner, y: back))
+            z.addLine(to: CGPoint(x: outer, y: H)); z.addLine(to: CGPoint(x: outer, y: H - zf)); z.closeSubpath()
+            cg.addPath(z); cg.setFillColor(Palette.rgb(0x4A2F1C).cgColor); cg.fillPath()
+            cg.restoreGState()
+            cg.setStrokeColor(Palette.rgb(0x0E1F17).cgColor); cg.setLineWidth(1.5)
+            cg.move(to: CGPoint(x: inner, y: wallTop)); cg.addLine(to: CGPoint(x: inner, y: back)); cg.strokePath()
+        }
         // Suelo de tablones en perspectiva
         let floor = CGMutablePath()
-        floor.move(to: CGPoint(x: left, y: back)); floor.addLine(to: CGPoint(x: sideX, y: back))
-        floor.addLine(to: CGPoint(x: W, y: H)); floor.addLine(to: CGPoint(x: max(0, left - 30), y: H)); floor.closeSubpath()
+        floor.move(to: CGPoint(x: bl, y: back)); floor.addLine(to: CGPoint(x: br, y: back))
+        floor.addLine(to: CGPoint(x: W, y: H)); floor.addLine(to: CGPoint(x: left, y: H)); floor.closeSubpath()
         cg.addPath(floor); cg.setFillColor(Palette.rgb(0x8A5A33).cgColor); cg.fillPath()
         cg.saveGState(); cg.addPath(floor); cg.clip()
         cg.setStrokeColor(Palette.rgb(0x5A3A22, 0.55).cgColor); cg.setLineWidth(1.2)
-        let vp = CGPoint(x: (left + sideX) / 2, y: back - 120)       // punto de fuga
-        var fx = left - 200
-        while fx < W + 200 {
-            cg.move(to: CGPoint(x: fx, y: H)); cg.addLine(to: vp); fx += 34
-        }
+        let vp = CGPoint(x: (bl + br) / 2, y: back - 160)       // punto de fuga
+        var fx = left - 300
+        while fx < W + 300 { cg.move(to: CGPoint(x: fx, y: H)); cg.addLine(to: vp); fx += 34 }
         cg.strokePath()
         for (k, yy) in [back + 10, back + 26, back + 48].enumerated() where yy < H {
             cg.setStrokeColor(Palette.rgb(0x5A3A22, 0.25 + 0.1 * CGFloat(k)).cgColor)

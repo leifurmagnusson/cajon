@@ -65,7 +65,7 @@ final class MonosView: StageView {
     }
 
     override func microphone() -> CGRect? {
-        CGRect(x: doorX - 12 - CGFloat(chats.count) * MonosView.cellW - 58, y: 20, width: 22, height: 44)
+        CGRect(x: doorX - 12 - CGFloat(chats.count) * MonosView.cellW - 84, y: MonosView.ground - 100, width: 80, height: 100)
     }
 
     override func actorIndex(at p: NSPoint) -> Int? {

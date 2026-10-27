@@ -83,26 +83,59 @@ class StageView: NSView {
         }
         return false
     }
+    /// Gramófono con bocina gigante: al tocarlo, hablas con Claude o ChatGPT.
     func drawMicrophone(_ cg: CGContext) {
-        guard let m = microphone() else { return }
-        let hover = hoverPoint.map { m.insetBy(dx: -6, dy: -6).contains($0) } ?? false
-        let sway = sin(t * 0.9) * 1.5
-        cg.setStrokeColor(Palette.outline.cgColor); cg.setLineWidth(1.6)
-        cg.move(to: CGPoint(x: m.midX, y: -drawOffsetY)); cg.addLine(to: CGPoint(x: m.midX + sway, y: m.minY)); cg.strokePath()
-        let x = m.midX + sway
-        // Micro de radio antiguo: rejilla redondeada con anillo dorado
-        let head = CGRect(x: x - m.width / 2, y: m.minY, width: m.width, height: m.height - 8)
-        rrect(cg, head, m.width / 2, Palette.rgb(0xB8BCC6), line: 2)
-        cg.saveGState(); cg.addPath(CGPath(roundedRect: head, cornerWidth: m.width / 2, cornerHeight: m.width / 2, transform: nil)); cg.clip()
-        cg.setStrokeColor(Palette.rgb(0x6B7080).cgColor); cg.setLineWidth(1)
-        var yy = head.minY + 4
-        while yy < head.maxY { cg.move(to: CGPoint(x: head.minX, y: yy)); cg.addLine(to: CGPoint(x: head.maxX, y: yy)); yy += 4 }
-        cg.strokePath(); cg.restoreGState()
-        rrect(cg, CGRect(x: x - m.width / 2 - 2, y: head.midY - 3, width: m.width + 4, height: 6), 3, Palette.rgb(0xC9A227), line: 1.4)
-        rrect(cg, CGRect(x: x - 4, y: head.maxY, width: 8, height: 8), 2, Palette.rgb(0x2B2B30), line: 1.4)
+        guard let r = microphone() else { return }
+        let hover = hoverPoint.map { r.insetBy(dx: -6, dy: -6).contains($0) } ?? false
+        let wood = Palette.rgb(0x7A4A28), brass = Palette.rgb(0xD4A82A), brassD = Palette.rgb(0x9C7A1C)
+        cg.setFillColor(NSColor.black.withAlphaComponent(0.15).cgColor)
+        cg.fillEllipse(in: CGRect(x: r.minX + 4, y: r.maxY - 4, width: r.width - 8, height: 8))
+        // Caja de madera con patitas
+        let box = CGRect(x: r.minX + 10, y: r.maxY - 30, width: r.width - 20, height: 24)
+        rrect(cg, CGRect(x: box.minX + 3, y: box.maxY - 2, width: 6, height: 7), 2, wood, line: 1.4)
+        rrect(cg, CGRect(x: box.maxX - 9, y: box.maxY - 2, width: 6, height: 7), 2, wood, line: 1.4)
+        rrect(cg, box, 4, wood, line: 2)
+        rrect(cg, box.insetBy(dx: 5, dy: 6), 2, Palette.rgb(0x5A3A22), line: 1.2)
+        ellipse(cg, CGRect(x: box.maxX - 4, y: box.midY - 3, width: 8, height: 6), brass, line: 1.2)   // manivela
+        // Disco girando
+        let disc = CGRect(x: box.minX + 3, y: box.minY - 7, width: box.width - 6, height: 9)
+        ellipse(cg, disc, Palette.rgb(0x151515), line: 1.6)
+        ellipse(cg, CGRect(x: disc.midX - 5, y: disc.midY - 2, width: 10, height: 4), Palette.rgb(0xE5484D), line: 0.8)
+        let spin = t * (hover ? 6 : 1.5)
+        cg.setStrokeColor(NSColor.white.withAlphaComponent(0.35).cgColor); cg.setLineWidth(1)
+        cg.move(to: CGPoint(x: disc.midX + cos(spin) * disc.width * 0.4, y: disc.midY + sin(spin) * disc.height * 0.4))
+        cg.addLine(to: CGPoint(x: disc.midX + cos(spin) * disc.width * 0.2, y: disc.midY + sin(spin) * disc.height * 0.2)); cg.strokePath()
+        // Brazo y cuello de la bocina
+        let neckBase = CGPoint(x: disc.maxX - 10, y: disc.minY + 2)
+        let mouth = CGPoint(x: r.minX + 26, y: r.minY + 24)       // centro de la boca de la bocina
+        let neck = CGMutablePath()
+        neck.move(to: neckBase)
+        neck.addCurve(to: CGPoint(x: mouth.x + 12, y: mouth.y + 14), control1: CGPoint(x: neckBase.x + 4, y: neckBase.y - 30),
+                      control2: CGPoint(x: mouth.x + 30, y: mouth.y + 26))
+        cg.addPath(neck); cg.setStrokeColor(Palette.outline.cgColor); cg.setLineWidth(7); cg.strokePath()
+        cg.addPath(neck); cg.setStrokeColor(brassD.cgColor); cg.setLineWidth(4.5); cg.strokePath()
+        // Bocina enorme (cono que se abre hacia arriba a la izquierda)
+        let wob = hover ? sin(t * 14) * 0.03 : 0
+        cg.saveGState()
+        cg.translateBy(x: mouth.x, y: mouth.y); cg.rotate(by: -0.55 + wob)
+        let horn = CGMutablePath()
+        horn.move(to: CGPoint(x: 20, y: 34)); horn.addQuadCurve(to: CGPoint(x: -30, y: 0), control: CGPoint(x: -2, y: 30))
+        horn.addLine(to: CGPoint(x: 30, y: 0)); horn.addQuadCurve(to: CGPoint(x: 26, y: 34), control: CGPoint(x: 8, y: 30)); horn.closeSubpath()
+        fillStroke(cg, horn, brass, line: 2)
+        // Pétalos de la bocina
+        cg.setStrokeColor(brassD.cgColor); cg.setLineWidth(1.2)
+        for k in -2...2 { cg.move(to: CGPoint(x: CGFloat(k) * 11, y: 1)); cg.addLine(to: CGPoint(x: 21 + CGFloat(k) * 1.2, y: 33)) }
+        cg.strokePath()
+        ellipse(cg, CGRect(x: -31, y: -8, width: 62, height: 16), Palette.rgb(0xF2D16B), line: 2)
+        ellipse(cg, CGRect(x: -20, y: -4.5, width: 40, height: 9), Palette.rgb(0x5A4510), line: 1.2)
+        cg.restoreGState()
         if hover {
-            ellipse(cg, CGRect(x: x - 4, y: head.minY - 12, width: 8, height: 8), Palette.rgb(0xE5484D, 0.6 + 0.4 * abs(sin(t * 5))), line: 1.2)
-            pill("🎙 hablar", center: CGPoint(x: x, y: m.maxY + 16), maxW: 90)
+            for n in 0..<3 {
+                let q = (t * 0.8 + CGFloat(n) / 3).truncatingRemainder(dividingBy: 1)
+                text(["♪", "♫", "♩"][n], Fonts.rounded(13, .black), Palette.outline.withAlphaComponent(1 - q),
+                     center: CGPoint(x: mouth.x - 24 - q * 20 + CGFloat(n) * 10, y: mouth.y - 14 - q * 26))
+            }
+            pill("🎙 hablar", center: CGPoint(x: r.midX, y: r.maxY + 14), maxW: 90)
         }
     }
     /// «¡Hola!»: saluda con la mano y juega con una pelota para que veas que ya ha terminado.
