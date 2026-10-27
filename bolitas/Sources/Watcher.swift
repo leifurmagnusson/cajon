@@ -232,25 +232,23 @@ final class Watcher {
     /// y, si está haciendo algo, lleva dentro un indicador de estado («En ejecución», «Esperando respuesta»…).
     static func claudeSidebar(_ n: [AXNode]) -> [Recent] {
         let k = kids(n)
+        // Títulos: cada conversación tiene un botón «Más opciones para <título>».
+        var titles: [String] = []
+        for x in n where x.role == "AXPopUpButton" {
+            for pre in ["Más opciones para ", "More options for "] where x.desc.hasPrefix(pre) {
+                let t = String(x.desc.dropFirst(pre.count))
+                if !titles.contains(t) { titles.append(t) }
+            }
+        }
         var out: [Recent] = []
-        var seen = Set<String>()
-        for (i, x) in n.enumerated() where x.role == "AXButton" && x.parent >= 0 {
-            // Junto a cada conversación hay un botón «Más opciones para <título>».
-            let sibs = k[x.parent]
-            guard let pos = sibs.firstIndex(of: i) else { continue }
-            var title = ""
-            for j in sibs[pos...] where n[j].role == "AXPopUpButton" {
-                let d = n[j].desc
-                for pre in ["Más opciones para ", "More options for "] where d.hasPrefix(pre) { title = String(d.dropFirst(pre.count)) }
-                break
-            }
-            guard !title.isEmpty, !seen.contains(title) else { continue }
+        for title in titles {
             var status = ""
-            for j in subtree(i, k) where n[j].subrole == "AXApplicationStatus" {
-                status = n[j].desc.isEmpty ? n[j].title : n[j].desc
+            if let i = n.indices.first(where: { n[$0].role == "AXButton" && (n[$0].title == title || n[$0].title.hasPrefix(title + " ")) }) {
+                for j in subtree(i, k) where n[j].subrole == "AXApplicationStatus" {
+                    status = n[j].desc.isEmpty ? n[j].title : n[j].desc
+                }
+                if status.isEmpty, n[i].title.hasPrefix(title + " ") { status = String(n[i].title.dropFirst(title.count + 1)) }
             }
-            if status.isEmpty, x.title.hasPrefix(title + " ") { status = String(x.title.dropFirst(title.count + 1)) }
-            seen.insert(title)
             out.append(Recent(title: title, status: status, provider: .claude))
         }
         return out
