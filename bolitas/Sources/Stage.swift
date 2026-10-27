@@ -92,8 +92,9 @@ class StageView: NSView {
         let h = abs(sin(t * 4.2 + ph))
         let r: CGFloat = 7
         let by = floorY - r - h * 30
-        let squash = h < 0.12 ? 1.25 : 1
-        let br = CGRect(x: ballX - r * squash, y: by - r / squash + (squash > 1 ? 2 : 0), width: r * 2 * squash, height: r * 2 / squash)
+        let squash: CGFloat = h < 0.12 ? 1.25 : 1
+        let lift: CGFloat = squash > 1 ? 2 : 0
+        let br = CGRect(x: ballX - r * squash, y: by - r / squash + lift, width: r * 2 * squash, height: r * 2 / squash)
         ellipse(cg, br, Palette.rgb(0xE5484D), line: 1.6)
         cg.saveGState(); cg.addEllipse(in: br); cg.clip()
         cg.setFillColor(NSColor.white.cgColor); cg.fill(CGRect(x: br.minX, y: br.midY - 2, width: br.width, height: 4))
