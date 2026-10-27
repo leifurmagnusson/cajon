@@ -10,7 +10,7 @@ enum Provider: String, Codable {
     var bundleIDs: [String] {
         switch self {
         case .claude: return ["com.anthropic.claudefordesktop"]
-        case .chatgpt: return ["com.openai.chat"]
+        case .chatgpt: return ["com.openai.chat", "com.openai.codex", "com.openai.chatgpt"]
         }
     }
     var letter: String { self == .claude ? "C" : "G" }

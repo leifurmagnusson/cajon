@@ -57,14 +57,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let watch = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             let need = !AX.trusted
-            if need != self.view.needsPermission { self.view.needsPermission = need; self.view.needsDisplay = true }
+            if need != self.view.needsPermission {
+                self.view.needsPermission = need; self.view.needsDisplay = true
+                if !need { DispatchQueue.main.asyncAfter(deadline: .now() + 3) { Watcher.shared.writeDiagnostics() } }
+            }
             Watcher.shared.tick()
             Watcher.shared.checkDiagnosticRequest()
             self.refreshStatus()
         }
         RunLoop.main.add(watch, forMode: .common)
-        // La primera vez, deja un diagnóstico para poder afinar la detección.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { Watcher.shared.writeDiagnostics() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { Updater.check() }
+        let up = Timer(timeInterval: 3 * 3600, repeats: true) { _ in Updater.check() }
+        RunLoop.main.add(up, forMode: .common)
     }
 
     // MARK: Panel
@@ -232,6 +236,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         add("Volver a colocar arriba en el centro", #selector(recenter))
         add("Abrir al iniciar sesión", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled)
         add("Guardar diagnóstico", #selector(diagnostics))
+        add("Buscar actualizaciones", #selector(checkUpdates))
         menu.addItem(.separator())
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         add("Bolitas \(v)", nil)
@@ -256,8 +261,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     @objc private func diagnostics() {
         Watcher.shared.writeDiagnostics()
-        tell("Diagnóstico guardado", "Está en la carpeta Bolitas de tu carpeta de inicio (diagnostico.txt).")
+        tell("Diagnóstico guardado", "Está en Descargas (Bolitas-diagnostico.txt).")
     }
+    @objc private func checkUpdates() { Updater.check(manual: true) }
     @objc private func quit() { NSApp.terminate(nil) }
 
     // MARK: Bolita de la barra de menús

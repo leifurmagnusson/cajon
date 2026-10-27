@@ -328,7 +328,7 @@ final class Watcher {
 
     // MARK: - Diagnóstico
 
-    /// Vuelca lo que se ve de cada app a ~/Bolitas/diagnostico.txt (para afinar la detección).
+    /// Vuelca lo que se ve de cada app a ~/Downloads/Bolitas-diagnostico.txt (para afinar la detección).
     func writeDiagnostics() {
         guard AX.trusted else { return }
         queue.async {
@@ -354,15 +354,14 @@ final class Watcher {
                     text += line + "\n"
                 }
             }
-            let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Bolitas", isDirectory: true)
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            try? text.write(to: dir.appendingPathComponent("diagnostico.txt"), atomically: true, encoding: .utf8)
+            let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads", isDirectory: true)
+            try? text.write(to: dir.appendingPathComponent("Bolitas-diagnostico.txt"), atomically: true, encoding: .utf8)
         }
     }
 
-    /// Si existe ~/Bolitas/pedir-diagnostico, escribe el diagnóstico y borra la petición.
+    /// Si existe ~/Downloads/Bolitas-pedir-diagnostico, escribe el diagnóstico y borra la petición.
     func checkDiagnosticRequest() {
-        let f = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Bolitas/pedir-diagnostico")
+        let f = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads/Bolitas-pedir-diagnostico")
         if FileManager.default.fileExists(atPath: f.path) {
             try? FileManager.default.removeItem(at: f)
             writeDiagnostics()
