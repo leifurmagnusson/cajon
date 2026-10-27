@@ -59,7 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let need = !AX.trusted
             if need != self.view.needsPermission {
                 self.view.needsPermission = need; self.view.needsDisplay = true
-                if !need { DispatchQueue.main.asyncAfter(deadline: .now() + 3) { Watcher.shared.writeDiagnostics() } }
+
             }
             Watcher.shared.tick()
             Watcher.shared.checkDiagnosticRequest()

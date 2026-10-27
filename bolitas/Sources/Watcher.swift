@@ -76,9 +76,9 @@ enum AX {
     }
 
     /// Foto plana del árbol de accesibilidad de una app (todas sus ventanas).
-    static func snapshot(pid: pid_t, budget: Int = 9000) -> [AXNode] {
+    static func snapshot(pid: pid_t, budget: Int = 2500) -> [AXNode] {
         let app = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(app, 0.8)
+        AXUIElementSetMessagingTimeout(app, 0.25)
         // Las apps hechas con Electron (Claude) solo enseñan su contenido si se lo pides así.
         AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         var winsRef: CFTypeRef?
@@ -123,9 +123,11 @@ final class Watcher {
         return nil
     }
 
+    private var lastScan = Date.distantPast
     func tick() {
-        guard !busy, AX.trusted else { return }
+        guard !busy, AX.trusted, Date().timeIntervalSince(lastScan) > 5.5 else { return }
         busy = true
+        lastScan = Date()
         let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
         queue.async {
             var obs: [Obs] = []
@@ -335,7 +337,7 @@ final class Watcher {
             var text = "Bolitas — diagnóstico \(Date())\n"
             for p in [Provider.claude, .chatgpt] {
                 guard let app = Watcher.runningApp(p) else { text += "\n=== \(p.name): no está abierta\n"; continue }
-                let nodes = AX.snapshot(pid: app.processIdentifier, budget: 20000)
+                let nodes = AX.snapshot(pid: app.processIdentifier, budget: 6000)
                 let obs = p == .claude ? Watcher.claude(nodes) : Watcher.chatgpt(nodes)
                 text += "\n=== \(p.name) (\(app.bundleIdentifier ?? "")) — \(nodes.count) elementos\n"
                 for o in obs where o.current || o.working || o.needs {
