@@ -96,6 +96,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         v.onMoved = { o in Prefs.setOrigin(o, for: Prefs.theme) }
         v.onDrop = { [weak self] s in self?.ingest(s) ?? false }
         v.menuFor = { [weak self] c in self?.chatMenu(c) }
+        v.onCassette = { p in Watcher.shared.newChat(p, voice: true) }
+        v.onCabinet = { [weak self, weak v] p, at in
+            guard let self = self, let v = v else { return }
+            self.cabinetMenu(p).popUp(positioning: nil, at: at, in: v)
+        }
         if let m = v as? MonosView { m.onDoorClick = { [weak self] in self?.usageClicked() } }
         if let g = v as? GorilasView { g.onDoorClick = { [weak self] in self?.usageClicked() } }
         if let e = v as? ElvesView { e.onSignClick = { [weak self] in self?.usageClicked() } }
@@ -224,6 +229,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("demo-\(th.rawValue)-\(n).png"))
             }
         }
+    }
+
+    /// El archivador: conversación nueva (con o sin voz) y la lista de conversaciones de la app.
+    private func cabinetMenu(_ p: Provider) -> NSMenu {
+        let m = NSMenu()
+        let head = m.addItem(withTitle: p == .claude ? "Claude" : "ChatGPT", action: nil, keyEquivalent: ""); head.isEnabled = false
+        let n1 = m.addItem(withTitle: "✏️  Conversación nueva", action: #selector(cabNew(_:)), keyEquivalent: "")
+        n1.target = self; n1.representedObject = p.rawValue
+        let n2 = m.addItem(withTitle: "🎙  Conversación nueva hablando", action: #selector(cabVoice(_:)), keyEquivalent: "")
+        n2.target = self; n2.representedObject = p.rawValue
+        m.addItem(.separator())
+        let rec = Watcher.shared.recents[p] ?? []
+        if rec.isEmpty {
+            let it = m.addItem(withTitle: "Abre \(p.name) con la barra lateral visible para ver aquí tus conversaciones", action: nil, keyEquivalent: "")
+            it.isEnabled = false
+        }
+        for r in rec.prefix(30) {
+            let st = Watcher.claudeStatus(r.status)
+            let dot = st.working ? "🟢" : (st.needs || st.reply ? "🟡" : "⚪️")
+            let it = m.addItem(withTitle: "\(dot)  \(r.title)", action: #selector(cabOpen(_:)), keyEquivalent: "")
+            it.target = self; it.representedObject = [p.rawValue, r.title]
+            if !r.status.isEmpty { it.toolTip = r.status }
+        }
+        return m
+    }
+    @objc private func cabNew(_ s: NSMenuItem) { if let r = s.representedObject as? String, let p = Provider(rawValue: r) { Watcher.shared.newChat(p, voice: false) } }
+    @objc private func cabVoice(_ s: NSMenuItem) { if let r = s.representedObject as? String, let p = Provider(rawValue: r) { Watcher.shared.newChat(p, voice: true) } }
+    @objc private func cabOpen(_ s: NSMenuItem) {
+        guard let a = s.representedObject as? [String], a.count == 2, let p = Provider(rawValue: a[0]) else { return }
+        Watcher.shared.openTitle(a[1], p)
     }
 
     @objc private func chooseSize(_ s: NSMenuItem) {

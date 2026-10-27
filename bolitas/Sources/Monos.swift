@@ -44,7 +44,7 @@ final class MonosView: StageView {
 
     override class func size(for count: Int) -> NSSize {
         let s = drawScale
-        return NSSize(width: (pad + CGFloat(count) * cellW + doorW + 30) * s, height: H * s)
+        return NSSize(width: (pad + 130 + CGFloat(count) * cellW + doorW + 30) * s, height: H * s)
     }
     private func look(_ c: Chat) -> ApeLook {
         if let l = looks[c.key] { return l }
@@ -56,6 +56,13 @@ final class MonosView: StageView {
         doorX - 12 - CGFloat(chats.count - i) * MonosView.cellW + MonosView.cellW / 2
     }
     private var doorRect: CGRect { CGRect(x: doorX, y: MonosView.ground - MonosView.doorH, width: MonosView.doorW, height: MonosView.doorH) }
+
+    override func cabinets() -> [(Provider, CGRect)] {
+        let x0 = doorX - 12 - CGFloat(chats.count) * MonosView.cellW - 130
+        let G = MonosView.ground
+        return [(.claude, CGRect(x: x0, y: G - 88, width: 54, height: 86)),
+                (.chatgpt, CGRect(x: x0 + 62, y: G - 88, width: 54, height: 86))]
+    }
 
     override func actorIndex(at p: NSPoint) -> Int? {
         for i in chats.indices where abs(p.x - slotX(i)) < MonosView.cellW / 2 && p.y > 40 { return i }
@@ -97,6 +104,7 @@ final class MonosView: StageView {
             if a >= 0 && a < 0.9 { plam = max(plam, a) }
         }
         drawDoor(cg, open: open)
+        drawCabinets(cg)
         for (i, c) in chats.enumerated() { drawApe(cg, c, i) }
 
         if plam >= 0 {

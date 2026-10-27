@@ -24,8 +24,13 @@ struct Obs {
     var chatID: String?
     var working = false
     var needs = false
+    var reply = false        // ha terminado o te ha preguntado algo: espera tu respuesta
     var current = false
+    var fromSidebar = false  // el estado lo dice la propia app en su barra lateral
 }
+
+/// Una conversación de la barra lateral de una app (para el archivador de chats).
+struct Recent { var title: String; var status: String; var provider: Provider }
 
 enum Rx {
     static func m(_ s: String, _ p: String) -> Bool {
@@ -115,6 +120,8 @@ final class Watcher {
     private var busy = false
     /// Últimas fotos, para poder pulsar un chat del lateral y para el diagnóstico.
     private(set) var lastNodes: [Provider: [AXNode]] = [:]
+    /// Conversaciones de la barra lateral de cada app (para el archivador).
+    private(set) var recents: [Provider: [Recent]] = [:]
 
     static func runningApp(_ p: Provider) -> NSRunningApplication? {
         for id in p.bundleIDs {
@@ -141,8 +148,12 @@ final class Watcher {
                 snaps[p] = nodes
                 obs += (p == .claude) ? Watcher.claude(nodes) : Watcher.chatgpt(nodes)
             }
+            var rec: [Provider: [Recent]] = [:]
+            if let cn = snaps[.claude] { rec[.claude] = Watcher.claudeSidebar(cn) }
+            if let gn = snaps[.chatgpt] { rec[.chatgpt] = Watcher.chatgptRecents(gn) }
             DispatchQueue.main.async {
                 self.lastNodes = snaps
+                self.recents = rec
                 Store.shared.apply(obs, frontmost: frontmost, running: running)
                 self.busy = false
             }
@@ -206,37 +217,91 @@ final class Watcher {
         return Rx.first(url, Rx.uuid)?.lowercased()
     }
 
-    static func claude(_ n: [AXNode]) -> [Obs] {
+    /// Estados que Claude escribe en su barra lateral junto a cada conversación.
+    static func claudeStatus(_ s: String) -> (working: Bool, needs: Bool, reply: Bool) {
+        let l = s.lowercased()
+        if Rx.m(l, "(esperando entrada|waiting for input|needs input|necesita (permiso|aprobaci)|needs (approval|permission)|awaiting (approval|input))") { return (false, true, false) }
+        if Rx.m(l, "(esperando respuesta|waiting for (a )?(response|reply|you)|needs (your )?(response|reply)|awaiting (response|reply)|tu turno|your turn)") { return (false, false, true) }
+        if Rx.m(l, "(en ejecuci|ejecutando|running|working|trabajando|pensando|thinking|generando|generating)") { return (true, false, false) }
+        if Rx.m(l, "esperando|waiting") { return (false, false, true) }
+        return (false, false, false)
+    }
+
+    /// Lee la lista «Recientes» de la barra lateral de Claude: cada conversación es un botón
+    /// y, si está haciendo algo, lleva dentro un indicador de estado («En ejecución», «Esperando respuesta»…).
+    static func claudeSidebar(_ n: [AXNode]) -> [Recent] {
         let k = kids(n)
+        var out: [Recent] = []
+        var seen = Set<String>()
+        for (i, x) in n.enumerated() where x.role == "AXButton" && x.parent >= 0 {
+            // Junto a cada conversación hay un botón «Más opciones para <título>».
+            let sibs = k[x.parent]
+            guard let pos = sibs.firstIndex(of: i) else { continue }
+            var title = ""
+            for j in sibs[pos...] where n[j].role == "AXPopUpButton" {
+                let d = n[j].desc
+                for pre in ["Más opciones para ", "More options for "] where d.hasPrefix(pre) { title = String(d.dropFirst(pre.count)) }
+                break
+            }
+            guard !title.isEmpty, !seen.contains(title) else { continue }
+            var status = ""
+            for j in subtree(i, k) where n[j].subrole == "AXApplicationStatus" {
+                status = n[j].desc.isEmpty ? n[j].title : n[j].desc
+            }
+            if status.isEmpty, x.title.hasPrefix(title + " ") { status = String(x.title.dropFirst(title.count + 1)) }
+            seen.insert(title)
+            out.append(Recent(title: title, status: status, provider: .claude))
+        }
+        return out
+    }
+
+    static func claude(_ n: [AXNode]) -> [Obs] {
         var out: [String: Obs] = [:]
         var currentID: String?, currentTitle = ""
         for x in n where x.role == "AXWebArea" {
             if let id = claudeID(x.url) { currentID = id; currentTitle = cleanTitle(x.title) }
         }
-        for (i, x) in n.enumerated() where x.role == "AXLink" {
-            guard let id = claudeID(x.url), id != "" else { continue }
-            let sub = subtree(i, k)
-            var title = x.title.isEmpty ? firstText(sub, n) : x.title
-            title = title.trimmingCharacters(in: .whitespacesAndNewlines)
-            let act = activity(Array(sub.dropFirst()), n)
-            let key = "claude:" + id
-            var o = out[key] ?? Obs(key: key, title: title, provider: .claude, chatID: id)
-            if o.title.isEmpty { o.title = title }
-            o.working = o.working || act.busy
-            o.needs = o.needs || act.wait
+        let side = claudeSidebar(n)
+        for r in side {
+            let st = claudeStatus(r.status)
+            let key = "claude:t:" + r.title
+            var o = Obs(key: key, title: r.title, provider: .claude, chatID: nil)
+            o.working = st.working; o.needs = st.needs; o.reply = st.reply
+            o.fromSidebar = true
             out[key] = o
         }
-        if let id = currentID {
-            let g = globalButtons(n)
-            let key = "claude:" + id
-            var o = out[key] ?? Obs(key: key, title: currentTitle, provider: .claude, chatID: id)
-            if !currentTitle.isEmpty { o.title = currentTitle }
-            o.current = true
-            o.working = o.working || g.stop
-            o.needs = o.needs || g.allow
-            out[key] = o
+        // El chat que tienes abierto: si está en la barra lateral, manda lo que dice la barra.
+        if !currentTitle.isEmpty || currentID != nil {
+            let key = "claude:t:" + currentTitle
+            if var o = out[key] {
+                o.current = true; o.chatID = currentID; out[key] = o
+            } else if side.isEmpty, let id = currentID {
+                // Sin barra lateral visible: lo poco que se ve en la ventana.
+                let g = globalButtons(n)
+                var o = Obs(key: key, title: currentTitle, provider: .claude, chatID: id)
+                o.current = true; o.working = g.stop; o.needs = g.allow
+                out[key] = o
+            }
         }
         return Array(out.values)
+    }
+
+    /// Conversaciones de la barra lateral de ChatGPT: botones que llevan dentro «Acciones del chat».
+    static func chatgptRecents(_ n: [AXNode]) -> [Recent] {
+        let k = kids(n)
+        var out: [Recent] = [], seen = Set<String>()
+        for (i, x) in n.enumerated() where x.role == "AXButton" && !x.title.isEmpty {
+            let sub = subtree(i, k)
+            guard sub.count < 30, sub.contains(where: { n[$0].role == "AXPopUpButton" && Rx.m(n[$0].desc + n[$0].title, "^(acciones del chat|chat actions)") }) else { continue }
+            guard !seen.contains(x.title), !x.title.hasPrefix("<") else { continue }
+            var status = ""
+            for j in sub where n[j].subrole == "AXApplicationStatus" || n[j].role == "AXProgressIndicator" || n[j].role == "AXBusyIndicator" {
+                status = n[j].desc.isEmpty ? "En ejecución" : n[j].desc
+            }
+            seen.insert(x.title)
+            out.append(Recent(title: x.title, status: status, provider: .chatgpt))
+        }
+        return out
     }
 
     static func chatgpt(_ n: [AXNode]) -> [Obs] {
@@ -292,6 +357,9 @@ final class Watcher {
             if c.provider == .claude, let id = c.chatID, x.role == "AXLink", Watcher.claudeID(x.url) == id {
                 if AX.press(el) { return true }
             }
+            if c.provider == .claude, x.role == "AXButton", !c.title.isEmpty, x.title == c.title || x.title.hasPrefix(c.title + " ") {
+                if AX.press(el) { return true }
+            }
             if c.provider == .chatgpt, ["AXRow", "AXCell", "AXButton", "AXLink"].contains(x.role) {
                 let t = x.allText
                 if !c.title.isEmpty && (x.title == c.title || t.hasPrefix(c.title)) {
@@ -305,19 +373,20 @@ final class Watcher {
     }
 
     func open(_ c: Chat) {
-        if c.provider == .claude, let id = c.chatID, let u = URL(string: "claude://claude.ai/chat/\(id)") {
-            NSWorkspace.shared.open(u)
-            return
-        }
         if let app = Watcher.runningApp(c.provider) {
             app.activate(options: [.activateAllWindows])
             queue.async {
                 let ok = self.pressInSidebar(c)
-                if !ok, c.provider == .chatgpt, let id = c.chatID, let u = URL(string: "https://chatgpt.com/c/\(id)") {
-                    DispatchQueue.main.async { NSWorkspace.shared.open(u) }
+                guard !ok else { return }
+                DispatchQueue.main.async {
+                    if c.provider == .claude, let id = c.chatID, let u = URL(string: "claude://claude.ai/chat/\(id)") { NSWorkspace.shared.open(u) }
+                    if c.provider == .chatgpt, let id = c.chatID, let u = URL(string: "https://chatgpt.com/c/\(id)") { NSWorkspace.shared.open(u) }
                 }
             }
             return
+        }
+        if c.provider == .claude, let id = c.chatID, let u = URL(string: "claude://claude.ai/chat/\(id)") {
+            NSWorkspace.shared.open(u); return
         }
         // La app no está abierta: la abrimos.
         if let id = c.provider.bundleIDs.first,
@@ -326,6 +395,47 @@ final class Watcher {
         } else if c.provider == .chatgpt, let id = c.chatID, let u = URL(string: "https://chatgpt.com/c/\(id)") {
             NSWorkspace.shared.open(u)
         }
+    }
+
+    /// Abre una conversación por su título (desde el archivador).
+    func openTitle(_ title: String, _ p: Provider) {
+        let c = Chat(key: "x", provider: p, title: title, chatID: nil, pinned: false, mood: .idle,
+                     since: Date(), lastConfirmed: Date(), evidence: .none, lastActive: Date())
+        open(c)
+    }
+
+    /// Conversación nueva en Claude o ChatGPT; con voz, además pulsa el micrófono de la app.
+    func newChat(_ p: Provider, voice: Bool) {
+        if p == .claude {
+            if let u = URL(string: "claude://claude.ai/new") { NSWorkspace.shared.open(u) }
+        } else if let app = Watcher.runningApp(p) {
+            app.activate(options: [.activateAllWindows])
+            queue.async { _ = self.pressButton(p, "^(nuevo chat|new chat)$") }
+        } else if let id = p.bundleIDs.first(where: { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil }),
+                  let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
+            NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, _ in }
+        }
+        guard voice else { return }
+        // Le damos un momento a que se abra el chat nuevo y buscamos el botón del micro.
+        for delay in [1.2, 2.2, 3.5] {
+            queue.asyncAfter(deadline: .now() + delay) {
+                if self.voicePressed { return }
+                if self.pressButton(p, "(dictad|dictar|dictation|micr[oó]fono|microphone|mensaje de voz|voice|modo de voz|hablar)") { self.voicePressed = true }
+            }
+        }
+        voicePressed = false
+    }
+    private var voicePressed = false
+
+    /// Pulsa el primer botón de la app cuya etiqueta encaje con el patrón (con una foto nueva del momento).
+    @discardableResult
+    func pressButton(_ p: Provider, _ pattern: String) -> Bool {
+        guard AX.trusted, let app = Watcher.runningApp(p) else { return false }
+        let nodes = AX.snapshot(pid: app.processIdentifier, budget: 4000)
+        for x in nodes where x.role == "AXButton" || x.role == "AXCheckBox" {
+            if Rx.m(x.labels.trimmingCharacters(in: .whitespaces), pattern), let el = x.el, AX.press(el) { return true }
+        }
+        return false
     }
 
     // MARK: - Diagnóstico

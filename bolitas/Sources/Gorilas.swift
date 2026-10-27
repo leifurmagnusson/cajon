@@ -41,14 +41,18 @@ final class GorilasView: StageView {
 
     override class func size(for count: Int) -> NSSize {
         let s = drawScale
-        return NSSize(width: (30 + CGFloat(count + 1) * cellW + doorW + 40) * s, height: H * s)   // +1: siempre hay una silla libre
+        return NSSize(width: (30 + 130 + CGFloat(count + 1) * cellW + doorW + 54) * s, height: H * s)   // +1: siempre hay una silla libre
     }
     private func look(_ c: Chat) -> GorillaLook {
         if let l = looks[c.key] { return l }
         let l = GorillaLook(c.key); looks[c.key] = l; return l
     }
     private var W: CGFloat { bounds.width / GorilasView.drawScale }
-    private var doorRect: CGRect { CGRect(x: W - GorilasView.doorW - 16, y: GorilasView.floor - GorilasView.doorH, width: GorilasView.doorW, height: GorilasView.doorH) }
+    /// La puerta, de frente y cerrada, en la pared del fondo (a la derecha).
+    private var doorRect: CGRect {
+        let back = GorilasView.tableTop + 6
+        return CGRect(x: W - GorilasView.doorW - 30, y: back - 140, width: GorilasView.doorW, height: 140)
+    }
     private func slotX(_ i: Int) -> CGFloat {
         doorRect.minX - 22 - CGFloat(chats.count - i) * GorilasView.cellW + GorilasView.cellW / 2
     }
@@ -56,6 +60,13 @@ final class GorilasView: StageView {
     /// Dónde cuelga cada lámpara (x en puntos de la ventana), para que Hold It dibuje sus anclajes en el techo.
     func lampXs() -> [CGFloat] {
         ([-1] + chats.indices.filter { age(chats[$0]) >= 1.6 }).map { slotX($0) * GorilasView.drawScale }
+    }
+
+    override func cabinets() -> [(Provider, CGRect)] {
+        let x0 = slotX(-1) - GorilasView.cellW / 2 - 126
+        let bottom = GorilasView.tableTop + 40
+        return [(.claude, CGRect(x: x0, y: bottom - 84, width: 54, height: 84)),
+                (.chatgpt, CGRect(x: x0 + 62, y: bottom - 84, width: 54, height: 84))]
     }
 
     override func actorIndex(at p: NSPoint) -> Int? {
@@ -102,14 +113,8 @@ final class GorilasView: StageView {
             let a = age(c)
             open = max(open, a < 0 ? 0 : a < 0.2 ? ease(a / 0.2) : a < 1.25 ? 1 : 1 - ease((a - 1.25) / 0.35))
         }
-        // La puerta está en la pared de la derecha, vista en perspectiva
-        cg.saveGState()
-        let dr = doorRect
-        cg.translateBy(x: dr.minX, y: dr.maxY)
-        cg.concatenate(CGAffineTransform(a: 0.62, b: -0.22, c: 0, d: 1, tx: 0, ty: 0))
-        cg.translateBy(x: -dr.minX, y: -dr.maxY)
         drawDoor(cg, open: open)
-        cg.restoreGState()
+        drawCabinets(cg)
 
         let seated = chats.enumerated().filter { age($0.element) >= 1.6 }
         // Lámparas (la de la silla libre, apagada)
@@ -514,7 +519,7 @@ final class GorilasView: StageView {
     private func drawRoom(_ cg: CGContext) {
         let F = GorilasView.floor, H = GorilasView.H
         let back: CGFloat = GorilasView.tableTop + 6      // donde la pared toca el suelo
-        let left = max(0, slotX(-1) - GorilasView.cellW / 2 - 20)
+        let left = max(0, slotX(-1) - GorilasView.cellW / 2 - 140)
         // Pared del fondo: papel pintado verde oscuro con rayas y zócalo de madera
         let wall = CGRect(x: left, y: 0, width: W - left, height: back)
         cg.setFillColor(Palette.rgb(0x1E3A2C).cgColor); cg.fill(wall)
@@ -524,7 +529,7 @@ final class GorilasView: StageView {
         cg.setFillColor(Palette.rgb(0x5A3A22).cgColor); cg.fill(CGRect(x: left, y: back - 30, width: W - left, height: 30))
         cg.setFillColor(Palette.rgb(0x7A4A28).cgColor); cg.fill(CGRect(x: left, y: back - 32, width: W - left, height: 4))
         // Pared de la derecha en perspectiva (donde está la puerta)
-        let sideX = doorRect.minX - 14
+        let sideX = doorRect.maxX + 12
         let side = CGMutablePath()
         side.move(to: CGPoint(x: sideX, y: 0)); side.addLine(to: CGPoint(x: W, y: 0))
         side.addLine(to: CGPoint(x: W, y: H)); side.addLine(to: CGPoint(x: sideX, y: back)); side.closeSubpath()

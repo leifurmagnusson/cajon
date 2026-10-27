@@ -51,6 +51,8 @@ final class Store {
     init() {
         if let d = UserDefaults.standard.data(forKey: key),
            let c = try? JSONDecoder().decode([Chat].self, from: d) { chats = c }
+        // Las de Claude se identifican ahora por su título en la barra lateral: fuera las del sistema viejo.
+        chats.removeAll { $0.key.hasPrefix("claude:") && !$0.key.hasPrefix("claude:t:") && !$0.pinned }
     }
 
     private func save() {
@@ -94,7 +96,7 @@ final class Store {
             var i = index(o.key)
             if i == nil {
                 // Solo aparecen solas las conversaciones que están haciendo algo.
-                guard o.working || o.needs else { continue }
+                guard o.working || o.needs || o.reply else { continue }
                 let c = Chat(key: o.key, provider: o.provider, title: o.title, chatID: o.chatID, pinned: false,
                              mood: .idle, since: now, lastConfirmed: now, evidence: .none, lastActive: now)
                 chats.append(c); i = chats.count - 1; changed = true
@@ -106,7 +108,11 @@ final class Store {
             if c.chatID == nil, let id = o.chatID { c.chatID = id }
 
             let viewing = o.current && frontmost.contains(o.provider)
-            if o.needs {
+            if o.fromSidebar { c.evidence = .sidebar }
+            if o.reply {
+                if c.mood != .done { c.mood = .done; c.since = now; onNeedsYou?(c) }
+                c.lastConfirmed = now; c.lastActive = now
+            } else if o.needs {
                 if c.mood != .needsYou { c.mood = .needsYou; c.since = now; onNeedsYou?(c) }
                 c.lastConfirmed = now; c.lastActive = now
             } else if o.working {
@@ -120,17 +126,24 @@ final class Store {
                     // lo dejamos en verde un rato prudencial antes de darlo por terminado.
                     let stillUnknown = !o.current && c.evidence == .current && now.timeIntervalSince(c.lastConfirmed) < 20 * 60
                     if !stillUnknown {
-                        if viewing { c.mood = .idle } else { c.mood = .done; onNeedsYou?(c) }
+                        if viewing || o.fromSidebar { c.mood = .idle } else { c.mood = .done; onNeedsYou?(c) }
                         c.since = now; c.lastActive = now
                     }
                 case .needsYou:
-                    c.mood = viewing ? .idle : .done; c.since = now; c.lastActive = now
+                    // Si la app ya no dice que espera, es que ya le has contestado.
+                    c.mood = (viewing || o.fromSidebar) ? .idle : .done; c.since = now; c.lastActive = now
                 case .done:
-                    if viewing { c.mood = .idle; c.since = now }
+                    if viewing || o.fromSidebar { c.mood = .idle; c.since = now }
                 case .idle: break
                 }
             }
             if c != before { chats[k] = c; changed = true }
+        }
+        // Las que la app ya no enseña (o de versiones viejas de Bolitas) no pueden seguir «trabajando».
+        let seenKeys = Set(observations.map { $0.key })
+        for k in chats.indices where running.contains(chats[k].provider) && !seenKeys.contains(chats[k].key)
+            && chats[k].mood != .idle && now.timeIntervalSince(chats[k].lastConfirmed) > 90 {
+            chats[k].mood = .idle; chats[k].since = now; changed = true
         }
         // Las que no están fijadas y llevan dos horas dormidas se van solas.
         let n = chats.count

@@ -58,6 +58,69 @@ class StageView: NSView {
     var onDrop: (([String]) -> Bool)?
     var menuFor: ((Chat) -> NSMenu?)?
     var onBackgroundClick: ((NSPoint) -> Bool)?
+    /// Archivadores de conversaciones (uno de Claude y otro de ChatGPT) con una grabadora encima.
+    var onCabinet: ((Provider, NSPoint) -> Void)?
+    var onCassette: ((Provider) -> Void)?
+    /// Dónde está cada archivador, en coordenadas de dibujo (las subclases que lo tengan lo dicen).
+    func cabinets() -> [(Provider, CGRect)] { [] }
+    private func cassetteRect(_ r: CGRect) -> CGRect { CGRect(x: r.minX + 3, y: r.minY - 24, width: r.width - 6, height: 22) }
+    /// Mira si el clic ha sido en un archivador o en su grabadora.
+    func furnitureClick(_ p: NSPoint) -> Bool {
+        for (prov, r) in cabinets() {
+            if cassetteRect(r).insetBy(dx: -3, dy: -3).contains(p) { onCassette?(prov); return true }
+            if r.contains(p) {
+                let k = type(of: self).drawScale
+                onCabinet?(prov, NSPoint(x: r.midX * k, y: r.minY * k)); return true
+            }
+        }
+        return false
+    }
+    func drawCabinets(_ cg: CGContext) {
+        for (prov, r) in cabinets() {
+            let hover = hoverPoint.map { r.contains($0) } ?? false
+            let hoverCas = hoverPoint.map { cassetteRect(r).insetBy(dx: -3, dy: -3).contains($0) } ?? false
+            let body = prov == .claude ? Palette.rgb(0xC96A4A) : Palette.rgb(0x3A3D44)
+            let dark = body.blended(withFraction: 0.3, of: .black) ?? body
+            cg.setFillColor(NSColor.black.withAlphaComponent(0.15).cgColor)
+            cg.fillEllipse(in: CGRect(x: r.minX - 4, y: r.maxY - 4, width: r.width + 8, height: 8))
+            rrect(cg, r, 4, body, line: 2.2)
+            // Tres cajones; el de arriba se abre un poco al pasar el ratón
+            for k in 0..<3 {
+                let dh = (r.height - 12) / 3
+                var d = CGRect(x: r.minX + 5, y: r.minY + 4 + CGFloat(k) * (dh + 2), width: r.width - 10, height: dh)
+                if k == 0 && hover { d = d.offsetBy(dx: 0, dy: 3).insetBy(dx: -3, dy: 0) }
+                rrect(cg, d, 3, k == 0 && hover ? (body.blended(withFraction: 0.15, of: .white) ?? body) : body, line: 1.8)
+                rrect(cg, CGRect(x: d.midX - 9, y: d.minY + 6, width: 18, height: 5), 2, Palette.rgb(0xD9D9D9), line: 1.2)
+                if k == 0 {
+                    rrect(cg, CGRect(x: d.minX + 4, y: d.maxY - 12, width: d.width - 8, height: 9), 2, Palette.rgb(0xF2E8CF), line: 1)
+                    text(prov == .claude ? "CLAUDE" : "CHATGPT", Fonts.rounded(6.5, .black), dark, center: CGPoint(x: d.midX, y: d.maxY - 7.5))
+                }
+                if k == 0 && hover {
+                    // fichas asomando
+                    for f in 0..<4 {
+                        rrect(cg, CGRect(x: d.minX + 5 + CGFloat(f) * 9, y: d.minY - 6 - CGFloat(f % 2) * 2, width: 8, height: 8), 1, Palette.rgb(0xFFF7E2), line: 1)
+                    }
+                }
+            }
+            // Grabadora de casete encima
+            let c = cassetteRect(r)
+            rrect(cg, c, 4, Palette.rgb(0x2B2B30), line: 2)
+            let win = CGRect(x: c.minX + 5, y: c.minY + 4, width: c.width - 22, height: c.height - 8)
+            rrect(cg, win, 3, Palette.rgb(0xE8DCC4), line: 1.4)
+            for (n, cx) in [win.minX + win.height * 0.6, win.maxX - win.height * 0.6].enumerated() {
+                let rr = win.height * 0.32
+                ellipse(cg, CGRect(x: cx - rr, y: win.midY - rr, width: rr * 2, height: rr * 2), Palette.rgb(0x5A4632), line: 1.2)
+                let a = (hoverCas ? t * 6 : 0) + CGFloat(n)
+                cg.setStrokeColor(Palette.rgb(0xE8DCC4).cgColor); cg.setLineWidth(1.2)
+                cg.move(to: CGPoint(x: cx - cos(a) * rr * 0.7, y: win.midY - sin(a) * rr * 0.7))
+                cg.addLine(to: CGPoint(x: cx + cos(a) * rr * 0.7, y: win.midY + sin(a) * rr * 0.7)); cg.strokePath()
+            }
+            let rec = CGRect(x: c.maxX - 14, y: c.midY - 5, width: 10, height: 10)
+            ellipse(cg, rec, Palette.rgb(0xE5484D, hoverCas ? 1 : 0.75 + 0.25 * sin(t * 3)), line: 1.4)
+            if hoverCas { pill("🎙 hablar", center: CGPoint(x: c.midX, y: c.minY - 12), maxW: 90) }
+            else if hover { pill("conversaciones", center: CGPoint(x: r.midX, y: c.minY - 12), maxW: 120) }
+        }
+    }
 
     private var pressIndex: Int?
     private var pressPoint = NSPoint.zero
@@ -179,6 +242,7 @@ class StageView: NSView {
     }
     override func mouseUp(with event: NSEvent) {
         if dragged { if let o = window?.frame.origin { onMoved?(o) }; return }
+        if furnitureClick(pressPoint) { return }
         if let i = pressIndex, i < chats.count { onClick?(chats[i]); return }
         if onBackgroundClick?(pressPoint) == true { return }
         if chats.isEmpty || needsPermission { onPlaceholderClick?() }
