@@ -247,7 +247,7 @@ final class HandView: NSView, NSDraggingSource {
 
     private var palm: CGPoint { CGPoint(x: bounds.width - 118, y: bounds.height - 74) }
 
-    private func layout() {
+    private func computeLayout() {
         let n = max(order.count, 1)
         let avail = palm.y - 24
         let s = min(1, max(0.45, avail / (CGFloat(n) * 64 + 4)))
@@ -290,7 +290,7 @@ final class HandView: NSView, NSDraggingSource {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let cg = NSGraphicsContext.current?.cgContext else { return }
-        layout()
+        computeLayout()
 
         if dragActive {
             let top = CGPoint(x: 0, y: -boxSize.height * CGFloat(order.count) - 40).applying(handTransform)
