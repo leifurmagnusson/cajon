@@ -185,6 +185,13 @@ final class HandView: NSView, NSDraggingSource {
                 st.ang.pos = .random(in: -0.32...0.32)
                 st.x.pos = .random(in: -14...14)
                 st.y.pos = -170
+                if frog, let d = pendingDrop {
+                    // Viene volando desde donde la soltaste, pegada a la lengua
+                    let slot = frogSlot(i)
+                    st.x.pos = d.x - slot.x
+                    st.y.pos = d.y - slot.y
+                    st.ang.pos = .random(in: -0.8...0.8)
+                }
                 states[id] = st
                 dip.vel += 70
                 phi.vel += .random(in: -0.5...0.5)
@@ -192,6 +199,7 @@ final class HandView: NSView, NSDraggingSource {
             }
         }
         for id in order where !newOrder.contains(id) { states[id] = nil; thumbs[id] = nil }
+        pendingDrop = nil
         order = newOrder
         selected = selected.intersection(newOrder)
         needsDisplay = true
@@ -234,10 +242,11 @@ final class HandView: NSView, NSDraggingSource {
         if !order.isEmpty { com /= CGFloat(order.count) }
         phi.target = max(-0.22, min(0.22, -com * 0.006))
         shift.target = max(-26, min(26, -com * 0.55))
-        phi.step(dt); shift.step(dt); dip.step(dt); slide.step(dt)
+        phi.step(dt); shift.step(dt); dip.step(dt); slide.step(dt); tongue.step(dt)
+        if !tongue.resting { moving = true }
         if exitT != nil { advanceGoodbye(dt); moving = true }
         if !phi.resting || !shift.resting || !dip.resting || !slide.resting { moving = true }
-        if moving { needsDisplay = true }
+        if moving { if frog && !tongueStuck && tongue.pos < 0.02 { setNeedsDisplay(frogArea) } else { needsDisplay = true } }
         return moving
     }
 
@@ -413,7 +422,166 @@ final class HandView: NSView, NSDraggingSource {
         }
     }
 
+    // MARK: Modo rana
+    // En cuanto arrastras algo, la rana saca la lengua y se te pega al cursor. Sueltes donde sueltes,
+    // la rana se lo traga (salvo que mantengas ⌥). Lo que se ha tragado queda en su nenúfar como cajas.
+
+    var frog = false { didSet { if frog != oldValue { needsDisplay = true } } }
+    var mouse = CGPoint.zero
+    var tongue = Spring(k: 320, c: 28)
+    var tongueStuck = false
+    private var tongueEnd = CGPoint.zero
+    private var pendingDrop: CGPoint?
+    var isDraggingOut: Bool { !draggingIDs.isEmpty }
+
+    private var frogCenter: CGPoint { CGPoint(x: bounds.width - 92, y: bounds.height - 62 + slide.pos * 200 + dip.pos * 0.3) }
+    private var frogMouth: CGPoint { CGPoint(x: frogCenter.x - 40, y: frogCenter.y - 4) }
+    var frogBodyRect: CGRect { CGRect(x: frogCenter.x - 62, y: frogCenter.y - 62, width: 124, height: 100) }
+    private var padY: CGFloat { bounds.height - 34 + slide.pos * 200 }
+    /// Zona de la rana, el nenúfar y las cajas (para repintar solo eso).
+    var frogArea: CGRect {
+        var r = CGRect(x: bounds.width - 440, y: bounds.height - 120, width: 440, height: 120)
+        for t in transforms { r = r.union(boxRect.insetBy(dx: -8, dy: -8).applying(t)) }
+        return r.union(frogBodyRect.insetBy(dx: -30, dy: -30))
+    }
+
+    private func frogSlot(_ i: Int) -> CGPoint {
+        let size = CGSize(width: 86 * 0.7, height: 64 * 0.7)
+        let gap: CGFloat = 6
+        let right = frogCenter.x - 70
+        let perRow = max(1, Int((right - (bounds.width - 420)) / (size.width + gap)))
+        let col = i % perRow, row = i / perRow
+        return CGPoint(x: right - size.width / 2 - CGFloat(col) * (size.width + gap), y: padY - 6 - CGFloat(row) * size.height)
+    }
+
+    private func frogLayout() {
+        boxSize = CGSize(width: 86 * 0.7, height: 64 * 0.7)
+        handTransform = .identity
+        transforms = []
+        for (i, id) in order.enumerated() {
+            let st = states[id]!
+            let sl = frogSlot(i)
+            let x = sl.x, y = sl.y
+            transforms.append(CGAffineTransform(translationX: x + st.x.pos, y: y + st.y.pos).rotated(by: st.ang.pos * 0.7))
+        }
+    }
+
+    private func drawFrog(_ cg: CGContext) {
+        if tongueStuck && dragActive {
+            // Casi invisible: así toda la pantalla recibe lo que sueltas (y la rana se lo come)
+            cg.setFillColor(NSColor(white: 0, alpha: 0.012).cgColor); cg.fill(bounds)
+        }
+        let c = frogCenter
+        // Nenúfar
+        let pad = CGRect(x: bounds.width - 400, y: padY - 18, width: 390, height: 40)
+        cg.saveGState()
+        cg.setShadow(offset: CGSize(width: 0, height: -3), blur: 8, color: NSColor(white: 0, alpha: 0.3).cgColor)
+        cg.setFillColor(NSColor(hex: 0x2F7D3A).cgColor); cg.fillEllipse(in: pad)
+        cg.restoreGState()
+        cg.setFillColor(NSColor(hex: 0x3E9A48).cgColor); cg.fillEllipse(in: pad.insetBy(dx: 6, dy: 4))
+        let notch = CGMutablePath(); notch.move(to: CGPoint(x: pad.midX, y: pad.midY))
+        notch.addLine(to: CGPoint(x: pad.midX - 22, y: pad.maxY)); notch.addLine(to: CGPoint(x: pad.midX + 6, y: pad.maxY)); notch.closeSubpath()
+        cg.addPath(notch); cg.setBlendMode(.clear); cg.fillPath(); cg.setBlendMode(.normal)
+        cg.setStrokeColor(NSColor(hex: 0x2F7D3A).cgColor); cg.setLineWidth(1.2)
+        for k in 0..<7 {
+            let a = CGFloat(k) / 7 * .pi * 2
+            cg.move(to: CGPoint(x: pad.midX, y: pad.midY)); cg.addLine(to: CGPoint(x: pad.midX + cos(a) * 170, y: pad.midY + sin(a) * 16))
+        }
+        cg.strokePath()
+
+        // Cajas que se ha tragado
+        for (i, t) in transforms.enumerated() where !draggingIDs.contains(order[i]) {
+            cg.saveGState(); cg.concatenate(t)
+            drawBox(cg, item: items[i], highlighted: hovered == i, isSelected: selected.contains(order[i]))
+            cg.restoreGState()
+        }
+
+        let green = NSColor(hex: 0x5DBB4A).cgColor, dark = NSColor(hex: 0x2E6B2A).cgColor
+        let line: (CGFloat) -> Void = { w in cg.setStrokeColor(dark); cg.setLineWidth(w) }
+        // Patas de atrás
+        for s in [-1.0, 1.0] as [CGFloat] {
+            let r = CGRect(x: c.x + s * 40 - 22, y: c.y + 14, width: 44, height: 28)
+            cg.setFillColor(green); cg.fillEllipse(in: r); line(2); cg.strokeEllipse(in: r)
+        }
+        // Cuerpo y barriga
+        let body = CGRect(x: c.x - 56, y: c.y - 44, width: 112, height: 82)
+        cg.saveGState()
+        cg.setShadow(offset: CGSize(width: 0, height: -3), blur: 6, color: NSColor(white: 0, alpha: 0.25).cgColor)
+        cg.setFillColor(green); cg.fillEllipse(in: body)
+        cg.restoreGState()
+        cg.setFillColor(NSColor(hex: 0xDDF2B4).cgColor); cg.fillEllipse(in: CGRect(x: c.x - 34, y: c.y - 4, width: 68, height: 40))
+        line(2.4); cg.strokeEllipse(in: body)
+        // Manchas
+        cg.setFillColor(NSColor(hex: 0x4A9E3B).cgColor)
+        for (dx, dy, r) in [(18.0, -30.0, 7.0), (34.0, -14.0, 5.0), (-6.0, -34.0, 4.0)] as [(CGFloat, CGFloat, CGFloat)] {
+            cg.fillEllipse(in: CGRect(x: c.x + dx - r, y: c.y + dy - r, width: r * 2, height: r * 2))
+        }
+        // Patas de delante
+        for dx in [-24.0, 22.0] as [CGFloat] {
+            let r = CGRect(x: c.x + dx - 12, y: c.y + 26, width: 24, height: 14)
+            cg.setFillColor(green); cg.fillEllipse(in: r); line(1.8); cg.strokeEllipse(in: r)
+        }
+        // Ojos saltones que siguen al cursor
+        for e in [CGPoint(x: c.x - 26, y: c.y - 44), CGPoint(x: c.x + 18, y: c.y - 46)] {
+            let outer = CGRect(x: e.x - 18, y: e.y - 18, width: 36, height: 36)
+            cg.setFillColor(green); cg.fillEllipse(in: outer); line(2.2); cg.strokeEllipse(in: outer)
+            let white = outer.insetBy(dx: 5, dy: 5)
+            cg.setFillColor(.white); cg.fillEllipse(in: white)
+            let dx = mouse.x - e.x, dy = mouse.y - e.y
+            let d = max(1, hypot(dx, dy))
+            let pc = CGPoint(x: e.x + dx / d * 6, y: e.y + dy / d * 6)
+            cg.setFillColor(NSColor(hex: 0x1A1A1A).cgColor)
+            cg.fillEllipse(in: CGRect(x: pc.x - 6, y: pc.y - 6, width: 12, height: 12))
+            cg.setFillColor(.white); cg.fillEllipse(in: CGRect(x: pc.x - 3.5, y: pc.y - 4.5, width: 3.5, height: 3.5))
+        }
+        // Mofletes
+        cg.setFillColor(NSColor(hex: 0xF29CA8, alpha: 0.6).cgColor)
+        cg.fillEllipse(in: CGRect(x: c.x - 48, y: c.y - 14, width: 14, height: 8))
+        cg.fillEllipse(in: CGRect(x: c.x + 30, y: c.y - 16, width: 14, height: 8))
+        // Boca (abierta si saca la lengua)
+        let m = frogMouth
+        if tongue.pos > 0.03 {
+            cg.setFillColor(NSColor(hex: 0x7A1F2B).cgColor)
+            cg.fillEllipse(in: CGRect(x: m.x - 4, y: m.y - 7, width: 26, height: 14))
+        }
+        line(2.2)
+        cg.move(to: m); cg.addQuadCurve(to: CGPoint(x: c.x + 36, y: c.y - 8), control: CGPoint(x: c.x, y: c.y + 8)); cg.strokePath()
+
+        // La lengua
+        if tongue.pos > 0.02 {
+            let target = tongueStuck ? mouse : tongueEnd
+            let k = min(1, tongue.pos)
+            let tip = CGPoint(x: m.x + (target.x - m.x) * k, y: m.y + (target.y - m.y) * k)
+            let len = hypot(tip.x - m.x, tip.y - m.y)
+            let ctrl = CGPoint(x: (m.x + tip.x) / 2, y: (m.y + tip.y) / 2 + min(60, len * 0.12))
+            cg.setLineCap(.round)
+            cg.setStrokeColor(NSColor(hex: 0xC2445C).cgColor); cg.setLineWidth(10)
+            cg.move(to: m); cg.addQuadCurve(to: tip, control: ctrl); cg.strokePath()
+            cg.setStrokeColor(NSColor(hex: 0xF07C92).cgColor); cg.setLineWidth(6)
+            cg.move(to: m); cg.addQuadCurve(to: tip, control: ctrl); cg.strokePath()
+            let blob = CGRect(x: tip.x - 11, y: tip.y - 11, width: 22, height: 22)
+            cg.setFillColor(NSColor(hex: 0xF07C92).cgColor); cg.fillEllipse(in: blob)
+            cg.setStrokeColor(NSColor(hex: 0xC2445C).cgColor); cg.setLineWidth(2); cg.strokeEllipse(in: blob)
+            cg.setFillColor(NSColor(white: 1, alpha: 0.6).cgColor); cg.fillEllipse(in: CGRect(x: tip.x - 6, y: tip.y - 7, width: 6, height: 5))
+        }
+    }
+
+    /// La rana suelta (o se ha tragado algo): la lengua vuelve a la boca.
+    func retractTongue(from p: CGPoint?) {
+        tongueEnd = p ?? mouse
+        tongueStuck = false
+        tongue.target = 0
+        needsDisplay = true
+    }
+    func shootTongue() {
+        tongueStuck = true
+        tongue.pos = max(tongue.pos, 0.02)
+        tongue.target = 1
+        needsDisplay = true
+    }
+
     private func computeLayout() {
+        if frog { frogLayout(); return }
         if ceiling { ceilingLayout(); return }
         let n = max(order.count, 1)
         let avail = palm.y - 24
@@ -470,11 +638,17 @@ final class HandView: NSView, NSDraggingSource {
 
     private func onHand(_ p: NSPoint) -> Bool {
         if ceiling { return beamRect.insetBy(dx: 0, dy: -4).contains(p) }
-        CGRect(x: -76, y: -16, width: 124, height: 48).contains(p.applying(handTransform.inverted()))
+        if frog { return frogBodyRect.contains(p) }
+        return CGRect(x: -76, y: -16, width: 124, height: 48).contains(p.applying(handTransform.inverted()))
     }
 
     /// Zona (en coordenadas de la vista) que debe capturar el ratón; el resto deja pasar los clics.
     func interactiveRect() -> CGRect {
+        if frog {
+            var r = frogBodyRect.insetBy(dx: -10, dy: -10)
+            for t in transforms { r = r.union(boxRect.insetBy(dx: -4, dy: -4).applying(t)) }
+            return r
+        }
         if ceiling {
             var r = beamRect.insetBy(dx: 0, dy: -6).union(pillarRect)
             for t in transforms { r = r.union(boxRect.insetBy(dx: -4, dy: -4).applying(t)) }
@@ -490,6 +664,7 @@ final class HandView: NSView, NSDraggingSource {
     override func draw(_ dirtyRect: NSRect) {
         guard let cg = NSGraphicsContext.current?.cgContext else { return }
         computeLayout()
+        if frog { drawFrog(cg); return }
         if ceiling { drawCeiling(cg); return }
 
         if dragActive {
@@ -754,6 +929,12 @@ final class HandView: NSView, NSDraggingSource {
     override func draggingEnded(_ sender: NSDraggingInfo) { dragHover = false }
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         dragHover = false
+        if frog {
+            let p = convert(sender.draggingLocation, from: nil)
+            pendingDrop = p
+            retractTongue(from: p)
+            dip.vel += 60
+        }
         return ingest(sender.draggingPasteboard)
     }
 }
@@ -851,6 +1032,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             hadItems = false
         }
 
+        if frogActive {
+            let m = hand.convert(panel.convertPoint(fromScreen: NSEvent.mouseLocation), from: nil)
+            let moved = hypot(m.x - hand.mouse.x, m.y - hand.mouse.y) > 0.5
+            hand.mouse = m
+            let letGo = NSEvent.modifierFlags.contains(.option)       // ⌥: la rana te suelta
+            if dragActive && hand.tongueStuck && (letGo || hand.isDraggingOut) { hand.retractTongue(from: nil) }
+            if dragActive && hand.tongueStuck {
+                panel.ignoresMouseEvents = false
+                hand.needsDisplay = true
+            } else {
+                panel.ignoresMouseEvents = !hand.interactiveRect().contains(m)
+                if moved { hand.setNeedsDisplay(hand.frogArea) }
+            }
+            if !shouldShow && hand.slide.pos > 0.97 && panel.isVisible { panel.orderOut(nil) }
+            return
+        }
         // Fuera de la mano y las cajas, los clics pasan a lo que haya debajo.
         if dragActive {
             panel.ignoresMouseEvents = false
@@ -871,11 +1068,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if dragActive {
                 dragActive = false
                 hand.dragActive = false
+                if frogActive && hand.tongueStuck { hand.retractTongue(from: nil) }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.updateVisibility() }
             }
         } else if cc != baseline && !dragActive {
             dragActive = true
             hand.dragActive = true
+            if frogActive && !hand.isDraggingOut && !NSEvent.modifierFlags.contains(.option) { hand.shootTongue() }
             if !panel.isVisible { place() }
             updateVisibility()
         }
@@ -904,7 +1103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 panel.orderFrontRegardless()
             }
             hand.slide.target = 0
-        } else if hadItems {
+        } else if hadItems && !frogActive {
             hand.startGoodbye()               // se despide y baja la escalera
         } else {
             hand.slide.target = 1             // arrastre sin soltar nada: se va sin más
@@ -923,6 +1122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var club: Club?
     private var placedFor = ""
     private var ceilingActive: Bool { Prefs.style == "techo" }
+    private var frogActive: Bool { Prefs.style == "rana" }
     private var clubAlive: Club? {
         guard let c = club, c.visible, Date().timeIntervalSince(c.at) < 6 else { return nil }
         return c
@@ -979,6 +1179,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// La mano sale de donde dejaste el brazo (por defecto, la esquina de abajo a la derecha).
     private func place() {
+        if frogActive {
+            // La rana ocupa toda la pantalla (transparente): su lengua llega a cualquier sitio
+            hand.ceiling = false
+            hand.frog = true
+            panel.setFrame(mouseScreen().frame, display: true)
+            hand.needsDisplay = true
+            return
+        }
+        hand.frog = false
         if ceilingActive { placeCeiling(); return }
         hand.ceiling = false
         let screen = panel.isVisible ? (panel.screen ?? mouseScreen()) : mouseScreen()
@@ -1023,9 +1232,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         add("Mostrar siempre la mano", #selector(toggleAlways), on: Prefs.alwaysVisible)
         menu.addItem(.separator())
         let st = menu.addItem(withTitle: "Estilo", action: nil, keyEquivalent: ""); st.isEnabled = false
-        add("Mano de camarero", #selector(styleHand), on: !ceilingActive)
+        add("Mano de camarero", #selector(styleHand), on: !ceilingActive && !frogActive)
         add("Techo del club (encima de Bolitas)", #selector(styleCeiling), on: ceilingActive)
-        if !ceilingActive { add("Volver a la esquina de abajo", #selector(resetArm)) }
+        add("Rana (te lo roba todo · ⌥ para que te suelte)", #selector(styleFrog), on: frogActive)
+        if !ceilingActive && !frogActive { add("Volver a la esquina de abajo", #selector(resetArm)) }
         add("Quitar al arrastrar fuera", #selector(toggleRemove), on: Prefs.removeAfterDrag)
         add("Abrir al iniciar sesión", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled)
         menu.addItem(.separator())
@@ -1038,6 +1248,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func pasteIn() { ingest(NSPasteboard.general) }
     @objc private func clearAll() { Store.shared.removeAll() }
     @objc private func styleHand() { Prefs.style = "mano"; place(); updateVisibility() }
+    @objc private func styleFrog() { Prefs.style = "rana"; place(); updateVisibility() }
     @objc private func styleCeiling() { Prefs.style = "techo"; place(); updateVisibility() }
     @objc private func resetArm() { Prefs.armOffset = nil; place() }
     @objc private func shake() { hand.nudgeAll(1.4) }
