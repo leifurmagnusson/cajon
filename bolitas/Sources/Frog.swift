@@ -1,6 +1,6 @@
 // Bolitas — la rana del tejado del club.
 // En cuanto empiezas a arrastrar algo (un archivo, una imagen, un texto, un enlace…), la rana saca la lengua
-// y se te pega al cursor. Sueltes donde sueltes, se lo traga y aparece como una caja en el tejado.
+// y se te pega al cursor, pero solo si lo acercas a su tercio de la pantalla. Si lo sueltas ahí, se lo traga.
 // Si no quieres que se lo quede, sacude el ratón 3 o 4 veces (izquierda-derecha o arriba-abajo) y te suelta.
 // La lengua se dibuja en una capa transparente que cubre la pantalla solo mientras arrastras.
 
@@ -65,6 +65,7 @@ final class Frog {
     private let dragPB = NSPasteboard(name: .drag)
     private var baseline = NSPasteboard(name: .drag).changeCount
     private var dragActive = false
+    private var armed = false      // este arrastre lo puede cazar (lo empezaste fuera del tejado)
     private var lastMouse: NSPoint?
     private var lastDirX = 0, lastDirY = 0
     private var flips: [CGFloat] = []
@@ -115,9 +116,22 @@ final class Frog {
         if cc != baseline && !dragActive {
             dragActive = true
             flips.removeAll(); lastMouse = nil; accX = 0; accY = 0; lastDirX = 0; lastDirY = 0
-            if enabled && !draggingOut && mouth != nil { state = .catching }
+            armed = enabled && !draggingOut && mouth != nil
         }
-        guard dragActive, state == .catching, let mouth = mouth, let screen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main else { return }
+        // La pantalla se divide en tres franjas: la rana solo saca la lengua cuando acercas
+        // lo que arrastras a la franja donde está ella. Si te alejas, la recoge y no se lo queda.
+        guard dragActive, armed, state != .letGo, let mouth = mouth else { return }
+        let m0 = NSEvent.mouseLocation
+        guard let fs = NSScreen.screens.first(where: { $0.frame.contains(mouth) }) ?? NSScreen.main else { return }
+        let third = fs.frame.width / 3
+        let frogZone = Int((mouth.x - fs.frame.minX) / third)
+        let inZone = fs.frame.contains(m0) && Int((m0.x - fs.frame.minX) / third) == frogZone
+        if !inZone {
+            if state == .catching { state = .resting; hideTongue() }
+            return
+        }
+        if state != .catching { state = .catching; flips.removeAll(); lastMouse = nil }
+        let screen = fs
 
         // Sacudida: cuenta los cambios de dirección rápidos del ratón.
         let m = NSEvent.mouseLocation
