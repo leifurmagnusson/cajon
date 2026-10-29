@@ -1037,6 +1037,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let moved = hypot(m.x - hand.mouse.x, m.y - hand.mouse.y) > 0.5
             hand.mouse = m
             let letGo = NSEvent.modifierFlags.contains(.option)       // ⌥: la rana te suelta
+            // Solo caza si acercas lo que arrastras a su franja de la pantalla (la derecha, de tres)
+            let inZone = m.x > hand.bounds.width * 2 / 3
+            if dragActive && !letGo && !hand.isDraggingOut {
+                if inZone && !hand.tongueStuck { hand.shootTongue() }
+                if !inZone && hand.tongueStuck { hand.retractTongue(from: nil) }
+            }
             if dragActive && hand.tongueStuck && (letGo || hand.isDraggingOut) { hand.retractTongue(from: nil) }
             if dragActive && hand.tongueStuck {
                 panel.ignoresMouseEvents = false
@@ -1074,7 +1080,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else if cc != baseline && !dragActive {
             dragActive = true
             hand.dragActive = true
-            if frogActive && !hand.isDraggingOut && !NSEvent.modifierFlags.contains(.option) { hand.shootTongue() }
             if !panel.isVisible { place() }
             updateVisibility()
         }
@@ -1234,7 +1239,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let st = menu.addItem(withTitle: "Estilo", action: nil, keyEquivalent: ""); st.isEnabled = false
         add("Mano de camarero", #selector(styleHand), on: !ceilingActive && !frogActive)
         add("Techo del club (encima de Bolitas)", #selector(styleCeiling), on: ceilingActive)
-        add("Rana (te lo roba todo · ⌥ para que te suelte)", #selector(styleFrog), on: frogActive)
+        add("Rana (caza en la franja derecha · ⌥ para que te suelte)", #selector(styleFrog), on: frogActive)
         if !ceilingActive && !frogActive { add("Volver a la esquina de abajo", #selector(resetArm)) }
         add("Quitar al arrastrar fuera", #selector(toggleRemove), on: Prefs.removeAfterDrag)
         add("Abrir al iniciar sesión", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled)
