@@ -81,14 +81,33 @@ enum AX {
     }
 
     /// Foto plana del árbol de accesibilidad de una app (todas sus ventanas).
+    /// Último error al pedir las ventanas de cada app (para el diagnóstico).
+    static var lastError: [pid_t: String] = [:]
+    /// Apps a las que ya se les ha pedido que enseñen su accesibilidad (Electron tarda en montarla la primera vez).
+    private static var primed = Set<pid_t>()
+
     static func snapshot(pid: pid_t, budget: Int = 2500) -> [AXNode] {
         let app = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(app, 0.25)
+        // Claude (Electron) en segundo plano contesta despacio: con 0,25 s fallaba a menudo y no veía nada.
+        AXUIElementSetMessagingTimeout(app, 1.5)
         // Las apps hechas con Electron (Claude) solo enseñan su contenido si se lo pides así.
         AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        if !primed.contains(pid) { primed.insert(pid); usleep(300_000) }
         var winsRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &winsRef) == .success else { return [] }
-        let wins = children(winsRef as AnyObject?)
+        var err = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &winsRef)
+        var wins = err == .success ? children(winsRef as AnyObject?) : []
+        if wins.isEmpty {
+            // Plan B: la ventana principal o la que tiene el foco.
+            for a in [kAXMainWindowAttribute, kAXFocusedWindowAttribute] {
+                var w: CFTypeRef?
+                let e2 = AXUIElementCopyAttributeValue(app, a as CFString, &w)
+                if e2 == .success, let w = w, CFGetTypeID(w) == AXUIElementGetTypeID() { wins = [w as! AXUIElement]; break }
+                if err == .success { err = e2 }
+            }
+        }
+        lastError[pid] = wins.isEmpty ? "sin ventanas (AXError \(err.rawValue))" : "ok (\(wins.count) ventanas)"
+        guard !wins.isEmpty else { return [] }
         var nodes: [AXNode] = []
         var stack: [(AXUIElement, Int, Int)] = wins.reversed().map { ($0, -1, 0) }
         while nodes.count < budget, let item = stack.popLast() {
@@ -478,11 +497,13 @@ final class Watcher {
         guard AX.trusted else { return }
         queue.async {
             var text = "Bolitas — diagnóstico \(Date())\n"
+            let locked = (CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Bool ?? false
+            text += "permiso de accesibilidad=\(AX.trusted) · pantalla bloqueada=\(locked) · versión \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?")\n"
             for p in [Provider.claude, .chatgpt] {
                 guard let app = Watcher.runningApp(p) else { text += "\n=== \(p.name): no está abierta\n"; continue }
                 let nodes = AX.snapshot(pid: app.processIdentifier, budget: 6000)
                 let obs = p == .claude ? Watcher.claude(nodes) : Watcher.chatgpt(nodes)
-                text += "\n=== \(p.name) (\(app.bundleIdentifier ?? "")) — \(nodes.count) elementos\n"
+                text += "\n=== \(p.name) (\(app.bundleIdentifier ?? "")) — \(nodes.count) elementos — \(AX.lastError[app.processIdentifier] ?? "?") — oculta=\(app.isHidden)\n"
                 let rec = p == .claude ? Watcher.claudeSidebar(nodes) : Watcher.chatgptRecents(nodes)
                 text += "  RECIENTES (\(rec.count)): " + rec.prefix(12).map { "«\($0.title)» \($0.status)" }.joined(separator: " · ") + "\n"
                 for o in obs where o.current || o.working || o.needs {
