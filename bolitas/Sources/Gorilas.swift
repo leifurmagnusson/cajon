@@ -111,6 +111,11 @@ final class GorilasView: StageView, NSDraggingSource {
         cg.setLineCap(.round); cg.setLineJoin(.round)
         drawRoom(cg)
         drawRoof(cg)
+        if !dockBadge.isEmpty {
+            let c = CGPoint(x: roomLeft + 66, y: roofTop - 62)
+            ellipse(cg, CGRect(x: c.x - 11, y: c.y - 11, width: 22, height: 22), Palette.rgb(0xE5484D), line: 2)
+            text(dockBadge, Fonts.rounded(11, .black), .white, center: c)
+        }
         drawDropHint(cg, CGRect(x: 2, y: 20 - GorilasView.topPad, width: W - 4, height: GorilasView.H + GorilasView.topPad - 24))
 
         // La puerta se abre cuando alguien entra o sale, y luego se cierra.
@@ -584,6 +589,8 @@ final class GorilasView: StageView, NSDraggingSource {
         return NSRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x - a.x), height: abs(b.y - a.y))
     }
     /// Boca de la chimenea en pantalla: por ahí sale el humo cuando la sala ya está llena.
+    /// Globito rojo del Dock de Claude, repetido en la chimenea (por si Bolitas aún no sabe qué gorila es).
+    var dockBadge = ""
     func chimneyScreen() -> NSPoint? { toScreen(roomLeft + 47, roofTop - 36) }
 
     /// Boca de la rana en coordenadas de pantalla (para la lengua).

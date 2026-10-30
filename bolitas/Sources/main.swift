@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let start = Date()
     private let smoke = SmokeOverlay()
     private let confetti = ConfettiOverlay()
+    private var appActivity: NSObjectProtocol?
     // Casa que se esconde como el Dock (solo en el club)
     private var houseHidden = false
     private var outsideSince: Date?
@@ -105,7 +106,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateVisibility()
         refreshStatus()
 
-        let watch = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
+        // Que macOS no «duerma» Bolitas cuando no la miras (App Nap): si no, tarda en enterarse.
+        appActivity = ProcessInfo.processInfo.beginActivity(options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical], reason: "Vigilar los chats")
+        let watch = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             let need = !AX.trusted
             if need != self.view.needsPermission { self.view.needsPermission = need; self.view.needsDisplay = true }
@@ -195,6 +198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let t = CGFloat(Date().timeIntervalSince(start))
         let dt = t - lastFrameT; lastFrameT = t
         view.t = t
+        (view as? GorilasView)?.dockBadge = Watcher.shared.dockBadge[.claude] ?? ""
         view.needsDisplay = true
         Frog.shared.step(t: t, dt: dt, mouth: (view as? GorilasView)?.frogMouthScreen())
         dockTick()

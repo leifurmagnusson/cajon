@@ -131,8 +131,42 @@ final class Watcher {
     }
 
     private var lastScan = Date.distantPast
+    /// Número del globito rojo de Claude en el Dock (se actualiza aunque Claude esté en segundo plano).
+    private(set) var dockBadge: [Provider: String] = [:]
+    private var lastBadge: [Provider: String] = [:]
+    private var urgentUntil = Date.distantPast
+
+    static func readDockBadges() -> [Provider: String] {
+        guard let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first else { return [:] }
+        let app = AXUIElementCreateApplication(dock.processIdentifier)
+        AXUIElementSetMessagingTimeout(app, 0.3)
+        var out: [Provider: String] = [:]
+        var lists: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXChildrenAttribute as CFString, &lists) == .success else { return [:] }
+        for list in AX.children(lists as AnyObject?) {
+            var items: CFTypeRef?
+            AXUIElementCopyAttributeValue(list, kAXChildrenAttribute as CFString, &items)
+            for it in AX.children(items as AnyObject?) {
+                var tRef: CFTypeRef?, bRef: CFTypeRef?
+                AXUIElementCopyAttributeValue(it, kAXTitleAttribute as CFString, &tRef)
+                AXUIElementCopyAttributeValue(it, "AXStatusLabel" as CFString, &bRef)
+                let title = AX.str(tRef as AnyObject?), badge = AX.str(bRef as AnyObject?)
+                if title == "Claude" { out[.claude] = badge }
+                if title == "ChatGPT" || title == "Codex" { out[.chatgpt] = badge }
+            }
+        }
+        return out
+    }
+
     func tick() {
-        guard !busy, AX.trusted, Date().timeIntervalSince(lastScan) > 5.5 else { return }
+        // Si Claude pone un aviso en el Dock, se mira enseguida y muy a menudo durante un rato.
+        if AX.trusted {
+            let b = Watcher.readDockBadges()
+            if b != lastBadge { urgentUntil = Date().addingTimeInterval(30); lastScan = .distantPast }
+            lastBadge = b; dockBadge = b
+        }
+        let every: TimeInterval = Date() < urgentUntil ? 1.0 : 2.5
+        guard !busy, AX.trusted, Date().timeIntervalSince(lastScan) > every else { return }
         busy = true
         lastScan = Date()
         let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
