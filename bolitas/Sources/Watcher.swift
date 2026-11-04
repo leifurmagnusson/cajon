@@ -326,7 +326,13 @@ final class Watcher {
         if !currentTitle.isEmpty || currentID != nil {
             let key = "claude:t:" + currentTitle
             if var o = out[key] {
-                o.current = true; o.chatID = currentID; out[key] = o
+                o.current = true; o.chatID = currentID
+                // Si el chat abierto tiene el botón de parar, está trabajando aunque la barra lateral no lo diga
+                // (pasa cuando el trabajo lo hace un agente en segundo plano).
+                let g = globalButtons(n)
+                if g.stop && !o.needs { o.working = true; o.reply = false }
+                if g.allow { o.needs = true }
+                out[key] = o
             } else if side.isEmpty, let id = currentID {
                 // Sin barra lateral visible: lo poco que se ve en la ventana.
                 let g = globalButtons(n)
