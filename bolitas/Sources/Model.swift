@@ -126,7 +126,7 @@ final class Store {
             if c.chatID == nil, let id = o.chatID { c.chatID = id }
 
             let viewing = o.current && frontmost.contains(o.provider)
-            if o.fromSidebar { c.evidence = .sidebar }
+            if o.fromSidebar && (o.working || o.needs || o.reply) && !o.fromStop { c.evidence = .sidebar }
             if o.reply {
                 // Ha terminado y espera tu respuesta: saluda hasta que entres a mirarlo; después, duerme.
                 if viewing { c.seen = true }
@@ -141,14 +141,16 @@ final class Store {
             } else if o.working {
                 c.seen = false
                 if c.mood != .working { c.mood = .working; c.since = now }
-                c.evidence = o.fromSidebar ? .sidebar : (o.current ? .current : .sidebar)
+                c.evidence = o.fromStop ? .current : (o.fromSidebar ? .sidebar : (o.current ? .current : .sidebar))
                 c.lastConfirmed = now; c.lastActive = now
             } else {
                 switch c.mood {
                 case .working:
                     // Si solo lo sabíamos por tenerlo abierto, al cambiar de chat no podemos saber si sigue:
                     // lo dejamos en verde un rato prudencial antes de darlo por terminado.
-                    let stillUnknown = !o.current && c.evidence == .current && now.timeIntervalSince(c.lastConfirmed) < 20 * 60
+                    // (Pasa con los agentes en segundo plano: Claude no los marca en la barra lateral.)
+                    // Solo lo damos por terminado cuando vuelves a abrirlo y ya no tiene el botón de parar.
+                    let stillUnknown = !o.current && c.evidence == .current && now.timeIntervalSince(c.lastConfirmed) < 3 * 3600
                     if !stillUnknown {
                         // Ha terminado: saluda hasta que entres a mirarlo.
                         if viewing { c.mood = .idle } else { c.mood = .done; onNeedsYou?(c) }

@@ -27,6 +27,7 @@ struct Obs {
     var reply = false        // ha terminado o te ha preguntado algo: espera tu respuesta
     var current = false
     var fromSidebar = false  // el estado lo dice la propia app en su barra lateral
+    var fromStop = false     // solo sabemos que trabaja por el botón de parar del chat abierto
 }
 
 /// Una conversación de la barra lateral de una app (para el archivador de chats).
@@ -330,7 +331,7 @@ final class Watcher {
                 // Si el chat abierto tiene el botón de parar, está trabajando aunque la barra lateral no lo diga
                 // (pasa cuando el trabajo lo hace un agente en segundo plano).
                 let g = globalButtons(n)
-                if g.stop && !o.needs { o.working = true; o.reply = false }
+                if g.stop && !o.needs { if !o.working { o.fromStop = true }; o.working = true; o.reply = false }
                 if g.allow { o.needs = true }
                 out[key] = o
             } else if side.isEmpty, let id = currentID {
