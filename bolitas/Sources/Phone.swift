@@ -156,24 +156,24 @@ final class Phone {
         let a = NSAlert()
         a.messageText = "Bolitas en el iPhone"
         a.informativeText = """
-        1 · Avisos: instala la app gratuita «ntfy» en el iPhone y escanea este código con la cámara. \
-        Te avisará cuando un chat espere tu OK.
+        1 · Avisos: instala la app gratuita «ntfy» en el iPhone. Pulsa aquí «Copiar el canal de avisos». \
+        En ntfy toca «+», pega el canal (el portapapeles pasa del Mac al iPhone solo) y «Subscribe».
+        Canal: \(alertTopic)
 
-        2 · Widget: instala la app gratuita «Scriptable». Pulsa «Copiar el widget» aquí abajo; en el iPhone, \
-        en Scriptable, toca «+» y pega (el portapapeles pasa del Mac al iPhone solo). Después, mantén pulsada la \
-        pantalla de bloqueo → Personalizar → añade el widget de Scriptable y elige este script.
+        2 · Widget: instala la app gratuita «Scriptable». Pulsa aquí «Copiar el widget». En Scriptable toca «+», \
+        pega y ponle nombre. Después, mantén pulsada la pantalla de bloqueo → Personalizar → añade el widget \
+        de Scriptable y elige ese script.
         """
-        if let q = qrImage("ntfy://ntfy.sh/\(alertTopic)") {
-            let iv = NSImageView(frame: NSRect(x: 0, y: 0, width: 200, height: 200))
-            iv.image = q; iv.imageScaling = .scaleProportionallyUpOrDown
-            a.accessoryView = iv
-        }
+        a.addButton(withTitle: "Copiar el canal de avisos")
         a.addButton(withTitle: "Copiar el widget")
         a.addButton(withTitle: "Cerrar")
         NSApp.activate(ignoringOtherApps: true)
-        if a.runModal() == .alertFirstButtonReturn {
+        let r = a.runModal()
+        if r == .alertFirstButtonReturn || r == .alertSecondButtonReturn {
             NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(widgetScript, forType: .string)
+            NSPasteboard.general.setString(r == .alertFirstButtonReturn ? alertTopic : widgetScript, forType: .string)
+            // Vuelve a abrir la ventana para el otro paso
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.showSetup() }
         }
     }
 }
