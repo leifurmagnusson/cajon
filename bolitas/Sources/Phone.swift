@@ -59,7 +59,12 @@ final class Phone {
                 case .idle: return ("⚪️", "parado")
                 }
             }()
-            return ["e": e, "n": c.title.isEmpty ? c.provider.name : c.title, "s": s, "h": Phone.hhmm.string(from: c.since)]
+            // Enlace para abrir ese chat en la app del iPhone (si Bolitas conoce su id; si no, la lista de chats)
+            let u: String = {
+                if c.provider == .claude { return c.chatID.map { "https://claude.ai/chat/\($0)" } ?? "https://claude.ai/recents" }
+                return c.chatID.map { "https://chatgpt.com/c/\($0)" } ?? "https://chatgpt.com"
+            }()
+            return ["e": e, "n": c.title.isEmpty ? c.provider.name : c.title, "s": s, "h": Phone.hhmm.string(from: c.since), "u": u]
         }
         let d = try? JSONSerialization.data(withJSONObject: ["c": items], options: [.sortedKeys])
         return d.flatMap { String(data: $0, encoding: .utf8) } ?? "{\"c\":[]}"
@@ -131,6 +136,7 @@ final class Phone {
         }
         const old = !when || (Date.now() - when.getTime()) > 3 * 3600 * 1000
         if (!data) {
+          w.url = "https://claude.ai/recents"
           add("Bolitas: sin datos", lock ? 13 : 14, true, "#F2E8CF")
           add("¿Mac apagado?", lock ? 12 : 12, false, "#C9D6CF")
         } else {
@@ -138,7 +144,15 @@ final class Phone {
           if (!lock) add("Bolitas", 13, true, "#F2C46D")
           if (c.length === 0) add("Ningún chat trabajando", lock ? 13 : 13, false, "#F2E8CF")
           const shown = c.length > max ? c.slice(0, max - 1) : c
-          for (const x of shown) add(`${x.e} ${x.n} · ${x.s} · ${x.h}`, lock ? 13 : 13, x.e === "🟡", "#F2E8CF")
+          // Tocar el widget abre el primer chat de la lista (el más urgente); en los grandes, cada línea abre el suyo
+          w.url = (shown[0] && shown[0].u) || "https://claude.ai/recents"
+          for (const x of shown) {
+            if (lock) { add(`${x.e} ${x.n} · ${x.s} · ${x.h}`, 13, x.e === "🟡", "#F2E8CF"); continue }
+            const row = w.addStack(); row.url = x.u || "https://claude.ai/recents"
+            const t = row.addText(`${x.e} ${x.n} · ${x.s} · ${x.h}`)
+            t.font = x.e === "🟡" ? Font.boldSystemFont(13) : Font.systemFont(13)
+            t.textColor = new Color("#F2E8CF"); t.lineLimit = 1; t.minimumScaleFactor = 0.7
+          }
           if (c.length > max) {
             const rest = c.slice(max - 1)
             const work = rest.filter(x => x.e === "🟢").length
