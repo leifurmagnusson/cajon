@@ -44,7 +44,7 @@ final class Phone {
 
     // MARK: Estado (para el widget)
 
-    private static let hhmm: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm"; return f }()
+    private static let hhmm: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "HH:mm"; return f }()
 
     private func payload() -> String {
         let order: [Mood] = [.needsYou, .done, .working, .idle]
