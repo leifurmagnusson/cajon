@@ -90,8 +90,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let menu = NSMenu(); menu.delegate = self
         statusItem.menu = menu
 
-        Store.shared.onChange = { [weak self] in self?.modelChanged() }
-        Store.shared.onNeedsYou = { _ in
+        Store.shared.onChange = { [weak self] in self?.modelChanged(); Phone.shared.publish() }
+        Store.shared.onNeedsYou = { c in
+            Phone.shared.alert(c)
             if Prefs.sound { NSSound(named: NSSound.Name("Pop"))?.play() }
         }
         Usage.shared.onChange = { [weak self] in self?.pushUsage() }
@@ -110,6 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         appActivity = ProcessInfo.processInfo.beginActivity(options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical], reason: "Vigilar los chats")
         let watch = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             guard let self = self else { return }
+            Phone.shared.publish()
             let need = !AX.trusted
             if need != self.view.needsPermission { self.view.needsPermission = need; self.view.needsDisplay = true }
             Watcher.shared.tick()
@@ -499,6 +501,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if !ShelfStore.shared.items.isEmpty { add("Vaciar el tejado (\(ShelfStore.shared.items.count))", #selector(clearRoof)) }
         }
         add("Sonido cuando te necesiten", #selector(toggleSound), on: Prefs.sound)
+        add("iPhone: widget y avisos", #selector(togglePhone), on: Phone.shared.enabled)
+        add("Configurar en el iPhone…", #selector(phoneSetup))
         add("Volver a su sitio", #selector(recenter))
         add("Abrir al iniciar sesión", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled)
         add("Guardar diagnóstico", #selector(diagnostics))
@@ -521,6 +525,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleAutoHide() { autoHide.toggle(); if !autoHide { setHouse(hidden: false) } }
     @objc private func toggleFrog() { Frog.shared.enabled.toggle() }
     @objc private func clearRoof() { ShelfStore.shared.removeAll() }
+    @objc private func togglePhone() { Phone.shared.enabled.toggle() }
+    @objc private func phoneSetup() { Phone.shared.showSetup() }
     @objc private func toggleSound() { Prefs.sound.toggle() }
     @objc private func recenter() {
         panel.setFrameOrigin(defaultOrigin(for: panel.frame.size))
