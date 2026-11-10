@@ -14,6 +14,19 @@ final class Phone {
     private var lastPayload = ""
     private var lastSent = Date.distantPast
     private var pendingTimer: Timer?
+    private var lastResult = "nada enviado aún"
+    var diagnostics: String {
+        "IPHONE activado=\(enabled) estado=\(statusTopic) avisos=\(alertTopic) último envío: \(lastResult)\n  contenido: \(lastPayload)"
+    }
+    private func send(_ r: URLRequest, _ what: String) {
+        URLSession.shared.dataTask(with: r) { [weak self] data, resp, err in
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            let body = data.flatMap { String(data: $0.prefix(200), encoding: .utf8) } ?? ""
+            DispatchQueue.main.async {
+                self?.lastResult = "\(what) \(Date()) → \(code) \(err?.localizedDescription ?? "") \(body)"
+            }
+        }.resume()
+    }
 
     var enabled: Bool {
         get { UserDefaults.standard.bool(forKey: "phone.enabled") }
@@ -70,8 +83,7 @@ final class Phone {
         lastPayload = p; lastSent = Date()
         var r = URLRequest(url: URL(string: "\(server)/\(statusTopic)")!)
         r.httpMethod = "POST"; r.httpBody = Data(p.utf8)
-        r.setValue("12h", forHTTPHeaderField: "Cache")
-        URLSession.shared.dataTask(with: r).resume()
+        send(r, "estado")
     }
 
     // MARK: Avisos
@@ -86,7 +98,7 @@ final class Phone {
         r.setValue("high", forHTTPHeaderField: "Priority")
         r.setValue("yellow_circle", forHTTPHeaderField: "Tags")
         r.setValue(c.provider == .claude ? "claude://" : "chatgpt://", forHTTPHeaderField: "Click")
-        URLSession.shared.dataTask(with: r).resume()
+        send(r, "aviso")
         publish(force: true)
     }
 

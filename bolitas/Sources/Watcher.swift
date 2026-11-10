@@ -503,7 +503,7 @@ final class Watcher {
     func writeDiagnostics() {
         guard AX.trusted else { return }
         queue.async {
-            var text = "Bolitas — diagnóstico \(Date())\n"
+            var text = "Bolitas — diagnóstico \(Date())\n" + Phone.shared.diagnostics + "\n"
             let locked = (CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Bool ?? false
             text += "permiso de accesibilidad=\(AX.trusted) · pantalla bloqueada=\(locked) · versión \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?")\n"
             for p in [Provider.claude, .chatgpt] {
