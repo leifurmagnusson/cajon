@@ -126,6 +126,8 @@ final class Phone {
         const fam = config.widgetFamily || "large"
         const lock = fam.startsWith("accessory")
         const max = lock ? 3 : (fam === "small" ? 4 : (fam === "medium" ? 4 : 10))
+        // Abrir en la app (no en el navegador): claude://… y chatgpt://…
+        const app = u => !u ? "claude://" : u.replace("https://claude.ai/recents", "claude://").replace("https://claude.ai/", "claude://claude.ai/").replace("https://chatgpt.com/c/", "chatgpt://c/").replace("https://chatgpt.com", "chatgpt://")
         const w = new ListWidget()
         w.refreshAfterDate = new Date(Date.now() + 5 * 60 * 1000)
         if (!lock) { w.backgroundColor = new Color("#1E3A2C"); w.setPadding(10, 12, 10, 12) }
@@ -136,7 +138,7 @@ final class Phone {
         }
         const old = !when || (Date.now() - when.getTime()) > 3 * 3600 * 1000
         if (!data) {
-          w.url = "https://claude.ai/recents"
+          w.url = "claude://"
           add("Bolitas: sin datos", lock ? 13 : 14, true, "#F2E8CF")
           add("¿Mac apagado?", lock ? 12 : 12, false, "#C9D6CF")
         } else {
@@ -145,10 +147,10 @@ final class Phone {
           if (c.length === 0) add("Ningún chat trabajando", lock ? 13 : 13, false, "#F2E8CF")
           const shown = c.length > max ? c.slice(0, max - 1) : c
           // Tocar el widget abre el primer chat de la lista (el más urgente); en los grandes, cada línea abre el suyo
-          w.url = (shown[0] && shown[0].u) || "https://claude.ai/recents"
+          w.url = app(shown[0] && shown[0].u)
           for (const x of shown) {
             if (lock) { add(`${x.e} ${x.n} · ${x.s} · ${x.h}`, 13, x.e === "🟡", "#F2E8CF"); continue }
-            const row = w.addStack(); row.url = x.u || "https://claude.ai/recents"
+            const row = w.addStack(); row.url = app(x.u)
             const t = row.addText(`${x.e} ${x.n} · ${x.s} · ${x.h}`)
             t.font = x.e === "🟡" ? Font.boldSystemFont(13) : Font.systemFont(13)
             t.textColor = new Color("#F2E8CF"); t.lineLimit = 1; t.minimumScaleFactor = 0.7
