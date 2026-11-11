@@ -164,17 +164,25 @@ final class Store {
                 case .idle: break
                 }
             }
+            if c.mood != before.mood {
+                Log.event("«\(c.title)» \(before.mood.rawValue) → \(c.mood.rawValue) · \(o.why)")
+            }
             if c != before { chats[k] = c; changed = true }
         }
         // Si la app ya no tiene ese chat (lo has borrado o no lo encuentra), el gorila se va por la puerta.
         // Solo cuando la app está abierta y sí se puede leer su lista: si no, no sabemos nada.
+        // Si el chat trabajaba o te esperaba, no se va solo por no verlo: puede que hayas cambiado a la pestaña
+        // «Code», que la lista haya bajado o que la app esté recargando. Se va solo si lleva 10 min sin aparecer.
         let seenKeys = Set(observations.map { $0.key })
-        let readable = Set(observations.map { $0.provider })
+        let readable = Set(observations.filter { $0.fromSidebar }.map { $0.provider })
         if now.timeIntervalSince(started) > 40 {
             let n = chats.count
             chats.removeAll { c in
-                running.contains(c.provider) && readable.contains(c.provider) && !seenKeys.contains(c.key)
-                    && now.timeIntervalSince(lastSeen[c.key] ?? started) > 25
+                let absent = now.timeIntervalSince(lastSeen[c.key] ?? started)
+                let gone = running.contains(c.provider) && readable.contains(c.provider) && !seenKeys.contains(c.key)
+                let busy = c.mood == .working || c.mood == .needsYou
+                if gone && absent > (busy ? 600 : 25) { Log.event("se va «\(c.title)» (no aparece en la lista desde hace \(Int(absent)) s)"); return true }
+                return false
             }
             if chats.count != n { changed = true }
         }
@@ -183,6 +191,50 @@ final class Store {
         chats.removeAll { !$0.pinned && $0.mood == .idle && now.timeIntervalSince($0.lastActive) > 2 * 3600 }
         if chats.count != n { changed = true }
         if changed { save() }
+    }
+}
+
+/// Caja negra: apunta cada cambio de estado y por qué, en ~/Applications/.bolitas/registro.txt,
+/// para poder ver qué pasó exactamente cuando Bolitas se equivoca.
+enum Log {
+    private static let q = DispatchQueue(label: "bolitas.log")
+    private static var seenUnknown = Set<String>()
+    private static let fmt: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "dd/MM HH:mm:ss"; return f }()
+    static var url: URL {
+        let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/.bolitas", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("registro.txt")
+    }
+    static func event(_ s: String) {
+        let line = "\(fmt.string(from: Date())) \(s)\n"
+        q.async {
+            let u = url
+            if let h = try? FileHandle(forWritingTo: u) {
+                h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close()
+                // Que no crezca sin fin: si pasa de 400 KB se queda con la segunda mitad.
+                if let a = try? FileManager.default.attributesOfItem(atPath: u.path), (a[.size] as? Int ?? 0) > 400_000,
+                   let d = try? Data(contentsOf: u) { try? d.suffix(200_000).write(to: u) }
+            } else { try? Data(line.utf8).write(to: u) }
+        }
+    }
+    private static var seenOnce = Set<String>()
+    static func once(_ s: String) {
+        q.async {
+            guard !seenOnce.contains(s) else { return }
+            seenOnce.insert(s)
+            DispatchQueue.main.async { event(s) }
+        }
+    }
+    /// Un texto de estado de la barra lateral que Bolitas no conoce (se apunta una sola vez).
+    static func unknownStatus(_ s: String) {
+        let ignore = ["incluye un artefacto", "includes an artifact"]
+        let l = s.lowercased()
+        guard !ignore.contains(where: { l.contains($0) }) else { return }
+        q.async {
+            guard !seenUnknown.contains(s) else { return }
+            seenUnknown.insert(s)
+            DispatchQueue.main.async { event("ESTADO DESCONOCIDO en la barra lateral: «\(s)»") }
+        }
     }
 }
 

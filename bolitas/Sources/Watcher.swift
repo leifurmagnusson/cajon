@@ -28,6 +28,7 @@ struct Obs {
     var current = false
     var fromSidebar = false  // el estado lo dice la propia app en su barra lateral
     var fromStop = false     // solo sabemos que trabaja por el botón de parar del chat abierto
+    var why = ""             // qué se vio (para el registro)
 }
 
 /// Una conversación de la barra lateral de una app (para el archivador de chats).
@@ -45,6 +46,8 @@ enum Rx {
     static let stop = "^(stop|detener|parar|interrumpir|aturar)( (response|generating|streaming|responding|la respuesta|respuesta|generación))?$"
     // Botones de permiso = te necesita.
     static let allow = "^(allow|permitir|aprobar|approve|always allow|permitir siempre|allow once|permitir una vez|allow for this chat|permitir en este chat|deny|denegar|rechazar)\\b"
+    static let allowYes = "^(allow|permitir|aprobar|approve|always allow|permitir siempre|allow once|permitir una vez|allow for this chat|permitir en este chat)\\b"
+    static let allowNo = "^(deny|denegar|rechazar|no permitir|don't allow|reject)\\b"
     // Indicadores junto a un chat del lateral.
     static let busy = "(thinking|pensando|running|en curso|ejecutando|working|trabajando|generating|generando|respondiendo|responding|loading|cargando|in progress|en progreso|streaming)"
     static let wait = "(needs (your )?(input|approval|attention|response)|waiting (for|on) (you|input|approval)|necesita (tu|que)|esperando (tu|aprobaci)|requires (your )?approval|awaiting)"
@@ -182,7 +185,10 @@ final class Watcher {
         // Si Claude pone un aviso en el Dock, se mira enseguida y muy a menudo durante un rato.
         if AX.trusted {
             let b = Watcher.readDockBadges()
-            if b != lastBadge { urgentUntil = Date().addingTimeInterval(30); lastScan = .distantPast }
+            if b != lastBadge {
+                urgentUntil = Date().addingTimeInterval(30); lastScan = .distantPast
+                Log.event("globito del Dock: Claude «\(b[.claude] ?? "")» ChatGPT «\(b[.chatgpt] ?? "")»")
+            }
             lastBadge = b; dockBadge = b
         }
         let every: TimeInterval = Date() < urgentUntil ? 1.0 : 2.5
@@ -250,13 +256,20 @@ final class Watcher {
         return (b, w)
     }
     private static func globalButtons(_ n: [AXNode]) -> (stop: Bool, allow: Bool) {
-        var s = false, a = false
+        // Un permiso de verdad trae a la vez un botón de aceptar y uno de rechazar.
+        // Un «Permitir» suelto (ajustes, un artefacto…) no cuenta.
+        var s = false, yes = false, no = false
         for y in n where y.role == "AXButton" {
             let l = y.labels.trimmingCharacters(in: .whitespaces)
             if Rx.m(l, Rx.stop) { s = true }
-            if Rx.m(l, Rx.allow) { a = true }
+            if Rx.m(l, Rx.allowYes) { yes = true }
+            if Rx.m(l, Rx.allowNo) { no = true }
         }
-        return (s, a)
+        if yes != no {
+            let labels = n.filter { $0.role == "AXButton" && (Rx.m($0.labels, Rx.allowYes) || Rx.m($0.labels, Rx.allowNo)) }.map { $0.labels }
+            Log.once("botón de permiso suelto: " + labels.joined(separator: " / "))
+        }
+        return (s, yes && no)
     }
     static func cleanTitle(_ t: String) -> String {
         var s = t
@@ -275,10 +288,10 @@ final class Watcher {
     static func claudeStatus(_ s: String) -> (working: Bool, needs: Bool, reply: Bool) {
         let l = s.lowercased()
         if Rx.m(l, "(esperando entrada|waiting for input|needs input|necesita (permiso|aprobaci)|needs (approval|permission)|awaiting (approval|input))") { return (false, true, false) }
-        // «Esperando respuesta»: te ha hecho una pregunta → también te pide algo.
-        if Rx.m(l, "(esperando respuesta|waiting for (a )?(response|reply|you)|needs (your )?(response|reply)|awaiting (response|reply))") { return (false, true, false) }
+        // «Esperando respuesta»: ha terminado y espera a que le escribas. No es un permiso: saluda, sin humo ni aviso.
+        if Rx.m(l, "(esperando respuesta|waiting for (a )?(response|reply|you)|needs (your )?(response|reply)|awaiting (response|reply))") { return (false, false, true) }
         if Rx.m(l, "(en ejecuci|ejecutando|running|working|trabajando|pensando|thinking|generando|generating)") { return (true, false, false) }
-        if Rx.m(l, "esperando|waiting") { return (false, true, false) }
+        if !l.isEmpty { Log.unknownStatus(s) }
         return (false, false, false)
     }
 
@@ -321,6 +334,7 @@ final class Watcher {
             var o = Obs(key: key, title: r.title, provider: .claude, chatID: nil)
             o.working = st.working; o.needs = st.needs; o.reply = st.reply
             o.fromSidebar = true
+            o.why = "barra lateral: «\(r.status)»"
             out[key] = o
         }
         // El chat que tienes abierto: si está en la barra lateral, manda lo que dice la barra.
@@ -333,12 +347,14 @@ final class Watcher {
                 let g = globalButtons(n)
                 if g.stop && !o.needs { if !o.working { o.fromStop = true }; o.working = true; o.reply = false }
                 if g.allow { o.needs = true }
+                o.why += " · abierto" + (g.stop ? " · botón Detener" : "") + (g.allow ? " · botones de permiso" : "")
                 out[key] = o
             } else if side.isEmpty, let id = currentID {
                 // Sin barra lateral visible: lo poco que se ve en la ventana.
                 let g = globalButtons(n)
                 var o = Obs(key: key, title: currentTitle, provider: .claude, chatID: id)
                 o.current = true; o.working = g.stop; o.needs = g.allow
+                o.why = "sin barra lateral · abierto" + (g.stop ? " · botón Detener" : "") + (g.allow ? " · botones de permiso" : "")
                 out[key] = o
             }
         }
@@ -401,6 +417,7 @@ final class Watcher {
             o.current = true
             o.working = o.working || g.stop
             o.needs = o.needs || g.allow
+            o.why = "ChatGPT abierto" + (g.stop ? " · botón Detener" : "") + (g.allow ? " · botones de permiso" : "")
             out[key] = o
         }
         return Array(out.values)
@@ -500,6 +517,15 @@ final class Watcher {
     // MARK: - Diagnóstico
 
     /// Vuelca lo que se ve de cada app a ~/Downloads/Bolitas-diagnostico.txt (para afinar la detección).
+    var keepCopy = false
+    /// Leifur avisa de que Bolitas se ha equivocado: se apunta el momento y se guarda una foto de lo que se ve.
+    func markMistake() {
+        let st = Store.shared.chats.filter { $0.mood != .idle }.map { "«\($0.title)» \($0.mood.rawValue)" }.joined(separator: ", ")
+        Log.event("⚠️ SE HA EQUIVOCADO (según Leifur). Bolitas mostraba: \(st.isEmpty ? "nada" : st)")
+        keepCopy = true
+        writeDiagnostics()
+    }
+
     func writeDiagnostics() {
         guard AX.trusted else { return }
         queue.async {
@@ -532,6 +558,11 @@ final class Watcher {
             let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/.bolitas", isDirectory: true)
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             try? text.write(to: dir.appendingPathComponent("diagnostico.txt"), atomically: true, encoding: .utf8)
+            if self.keepCopy {
+                self.keepCopy = false
+                let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss"
+                try? text.write(to: dir.appendingPathComponent("fallo-\(f.string(from: Date())).txt"), atomically: true, encoding: .utf8)
+            }
         }
     }
 

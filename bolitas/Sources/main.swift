@@ -505,6 +505,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         add("Configurar en el iPhone…", #selector(phoneSetup))
         add("Volver a su sitio", #selector(recenter))
         add("Abrir al iniciar sesión", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled)
+        add("⚠️ Se ha equivocado ahora", #selector(mistake))
         add("Guardar diagnóstico", #selector(diagnostics))
         add("Buscar actualizaciones", #selector(checkUpdates))
         menu.addItem(.separator())
@@ -542,6 +543,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func diagnostics() {
         Watcher.shared.writeDiagnostics()
         tell("Diagnóstico guardado", "Guardado para afinar la detección.")
+    }
+    @objc private func mistake() {
+        Watcher.shared.markMistake()
+        tell("Apuntado", "Claude podrá ver qué estaba pasando justo ahora y corregirlo.")
     }
     @objc private func checkUpdates() { Updater.check(manual: true) }
     @objc private func quit() { NSApp.terminate(nil) }
