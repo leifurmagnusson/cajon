@@ -289,7 +289,7 @@ final class Watcher {
         let l = s.lowercased()
         if Rx.m(l, "(esperando entrada|waiting for input|needs input|necesita (permiso|aprobaci)|needs (approval|permission)|awaiting (approval|input))") { return (false, true, false) }
         // «Esperando respuesta»: ha terminado y espera a que le escribas. No es un permiso: saluda, sin humo ni aviso.
-        if Rx.m(l, "(esperando respuesta|waiting for (a )?(response|reply|you)|needs (your )?(response|reply)|awaiting (response|reply))") { return (false, false, true) }
+        if Rx.m(l, "(esperando respuesta|respuesta no le[ií]da|unread (response|reply)|waiting for (a )?(response|reply|you)|needs (your )?(response|reply)|awaiting (response|reply))") { return (false, false, true) }
         if Rx.m(l, "(en ejecuci|ejecutando|running|working|trabajando|pensando|thinking|generando|generating)") { return (true, false, false) }
         if !l.isEmpty { Log.unknownStatus(s) }
         return (false, false, false)
